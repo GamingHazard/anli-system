@@ -127,6 +127,43 @@ export type PayrollRun = {
   notes?: string
   payslips: PayrollPayslipSnapshot[]
 }
+export type AdvanceStatus = 'Pending review' | 'Approved' | 'Rejected' | 'Active' | 'Settled'
+export type AdvanceRepaymentFrequency = 'Weekly' | 'Monthly'
+export type AdvanceRepaymentMethod = 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Payroll'
+export type AdvanceScheduleEntry = { id: string; dueDate: string; plannedAmount: number }
+export type AdvanceRepayment = { id: string; date: string; amount: number; method: AdvanceRepaymentMethod; reference?: string; note?: string; recordedAt: string }
+export type AdvanceActivity = { id: string; action: string; actor: string; at: string; note?: string }
+export type SalaryAdvance = {
+  id: string
+  reference: string
+  employeeId: string
+  employeeNumber: string
+  employeeName: string
+  department: string
+  role: string
+  category: EmployeeCategory
+  paymentFrequency?: Employee['paymentFrequency']
+  requestedAmount: number
+  reason: string
+  requestedAt: string
+  proposedFrequency: AdvanceRepaymentFrequency
+  proposedInstallmentAmount: number
+  proposedFirstDueDate: string
+  status: AdvanceStatus
+  approvedAmount?: number
+  approvedFrequency?: AdvanceRepaymentFrequency
+  approvedInstallmentAmount?: number
+  firstDueDate?: string
+  decisionAt?: string
+  decisionBy?: string
+  rejectionReason?: string
+  disbursement?: { amount: number; date: string; method: Exclude<AdvanceRepaymentMethod, 'Payroll'>; reference?: string; recordedAt: string }
+  schedule: AdvanceScheduleEntry[]
+  repayments: AdvanceRepayment[]
+  activity: AdvanceActivity[]
+  createdAt: string
+  updatedAt: string
+}
 export type Expense = { id: string; reference: string; category: string; description: string; amount: number; date: string; status: 'Paid' | 'Pending'; department: string }
 export type Customer = {
   id: string
@@ -148,7 +185,7 @@ export type Customer = {
 }
 export type RawMaterial = { id: string; code: string; name: string; category: string; quantity: number; unit: string; threshold: number; cost: number; location: string }
 export type Activity = { id: string; action: string; module: string; actor: string; time: string; outcome: 'Success' | 'Review' }
-export type ErpState = { sales: Sale[]; payments: SalePayment[]; orders: Order[]; employees: Employee[]; employeeDrafts: EmployeeDraft[]; attendanceRecords: AttendanceRecord[]; payrollRuns: PayrollRun[]; expenses: Expense[]; customers: Customer[]; materials: RawMaterial[]; activities: Activity[] }
+export type ErpState = { sales: Sale[]; payments: SalePayment[]; orders: Order[]; employees: Employee[]; employeeDrafts: EmployeeDraft[]; attendanceRecords: AttendanceRecord[]; payrollRuns: PayrollRun[]; salaryAdvances: SalaryAdvance[]; expenses: Expense[]; customers: Customer[]; materials: RawMaterial[]; activities: Activity[] }
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
 const daysFromNow = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10)
@@ -180,6 +217,7 @@ export const seedState: ErpState = {
   employeeDrafts: [],
   attendanceRecords: [],
   payrollRuns: [],
+  salaryAdvances: [],
   expenses: [
     { id: 'EX-209', reference: 'EXP-209', category: 'Logistics', description: 'Delivery fuel and maintenance', amount: 680000, date: daysAgo(1), status: 'Paid', department: 'Operations' },
     { id: 'EX-208', reference: 'EXP-208', category: 'Utilities', description: 'Factory electricity', amount: 1250000, date: daysAgo(4), status: 'Pending', department: 'Production' },
@@ -324,10 +362,84 @@ export const loadState = (): ErpState => {
     const employeeDrafts = Array.isArray(parsed.employeeDrafts) ? parsed.employeeDrafts : []
     const attendanceRecords = normalizeAttendanceRecords(parsed.attendanceRecords)
     const payrollRuns = normalizePayrollRuns(parsed.payrollRuns)
-    return linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, payments, orders, employees, employeeDrafts, attendanceRecords, payrollRuns })
+    const salaryAdvances = normalizeSalaryAdvances(parsed.salaryAdvances)
+    return linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, payments, orders, employees, employeeDrafts, attendanceRecords, payrollRuns, salaryAdvances })
   } catch {
     return linkCustomerTransactions(cloneSeed())
   }
+}
+
+const normalizeSalaryAdvances = (value: unknown): SalaryAdvance[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((advance, index) => {
+      const status: AdvanceStatus = ['Pending review', 'Approved', 'Rejected', 'Active', 'Settled'].includes(String(advance.status)) ? advance.status as AdvanceStatus : 'Pending review'
+      const frequency = (input: unknown): AdvanceRepaymentFrequency => input === 'Weekly' ? 'Weekly' : 'Monthly'
+      const method = (input: unknown): AdvanceRepaymentMethod => ['Cash', 'Mobile Money', 'Bank Transfer', 'Payroll'].includes(String(input)) ? input as AdvanceRepaymentMethod : 'Cash'
+      const schedule: AdvanceScheduleEntry[] = Array.isArray(advance.schedule)
+        ? advance.schedule.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')).map((entry, entryIndex) => ({
+            id: String(entry.id || `ASCH-${index + 1}-${entryIndex + 1}`),
+            dueDate: String(entry.dueDate || ''),
+            plannedAmount: Math.max(0, Number(entry.plannedAmount) || 0),
+          })).filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry.dueDate))
+        : []
+      const repayments: AdvanceRepayment[] = Array.isArray(advance.repayments)
+        ? advance.repayments.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')).map((entry, entryIndex) => ({
+            id: String(entry.id || `AREP-${index + 1}-${entryIndex + 1}`),
+            date: String(entry.date || ''),
+            amount: Math.max(0, Number(entry.amount) || 0),
+            method: method(entry.method),
+            reference: typeof entry.reference === 'string' ? entry.reference : undefined,
+            note: typeof entry.note === 'string' ? entry.note : undefined,
+            recordedAt: typeof entry.recordedAt === 'string' ? entry.recordedAt : new Date().toISOString(),
+          })).filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry.date) && entry.amount > 0)
+        : []
+      const activity: AdvanceActivity[] = Array.isArray(advance.activity)
+        ? advance.activity.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')).map((entry, entryIndex) => ({
+            id: String(entry.id || `AACT-${index + 1}-${entryIndex + 1}`),
+            action: String(entry.action || 'Record updated'),
+            actor: String(entry.actor || 'Administrator'),
+            at: typeof entry.at === 'string' ? entry.at : new Date().toISOString(),
+            note: typeof entry.note === 'string' ? entry.note : undefined,
+          }))
+        : []
+      const disbursementValue = advance.disbursement && typeof advance.disbursement === 'object' ? advance.disbursement as Record<string, unknown> : undefined
+      const disbursement = disbursementValue && Number(disbursementValue.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(disbursementValue.date || ''))
+        ? { amount: Math.max(0, Number(disbursementValue.amount)), date: String(disbursementValue.date), method: method(disbursementValue.method) as Exclude<AdvanceRepaymentMethod, 'Payroll'>, reference: typeof disbursementValue.reference === 'string' ? disbursementValue.reference : undefined, recordedAt: typeof disbursementValue.recordedAt === 'string' ? disbursementValue.recordedAt : new Date().toISOString() }
+        : undefined
+      const createdAt = typeof advance.createdAt === 'string' ? advance.createdAt : new Date().toISOString()
+      return {
+        id: String(advance.id || createId('ADV')),
+        reference: String(advance.reference || `ADV-${String(index + 1).padStart(4, '0')}`),
+        employeeId: String(advance.employeeId || ''),
+        employeeNumber: String(advance.employeeNumber || ''),
+        employeeName: String(advance.employeeName || 'Unknown employee'),
+        department: String(advance.department || ''),
+        role: String(advance.role || ''),
+        category: String(advance.category || 'Other') as EmployeeCategory,
+        paymentFrequency: advance.paymentFrequency === 'Weekly' || advance.paymentFrequency === 'Monthly' ? advance.paymentFrequency as Employee['paymentFrequency'] : undefined,
+        requestedAmount: Math.max(0, Number(advance.requestedAmount) || 0),
+        reason: String(advance.reason || ''),
+        requestedAt: typeof advance.requestedAt === 'string' ? advance.requestedAt : createdAt,
+        proposedFrequency: frequency(advance.proposedFrequency),
+        proposedInstallmentAmount: Math.max(0, Number(advance.proposedInstallmentAmount) || 0),
+        proposedFirstDueDate: String(advance.proposedFirstDueDate || ''),
+        status,
+        approvedAmount: Number(advance.approvedAmount) > 0 ? Number(advance.approvedAmount) : undefined,
+        approvedFrequency: advance.approvedFrequency === 'Weekly' || advance.approvedFrequency === 'Monthly' ? advance.approvedFrequency as AdvanceRepaymentFrequency : undefined,
+        approvedInstallmentAmount: Number(advance.approvedInstallmentAmount) > 0 ? Number(advance.approvedInstallmentAmount) : undefined,
+        firstDueDate: typeof advance.firstDueDate === 'string' ? advance.firstDueDate : undefined,
+        decisionAt: typeof advance.decisionAt === 'string' ? advance.decisionAt : undefined,
+        decisionBy: typeof advance.decisionBy === 'string' ? advance.decisionBy : undefined,
+        rejectionReason: typeof advance.rejectionReason === 'string' ? advance.rejectionReason : undefined,
+        disbursement,
+        schedule,
+        repayments,
+        activity,
+        createdAt,
+        updatedAt: typeof advance.updatedAt === 'string' ? advance.updatedAt : createdAt,
+      }
+    }).filter((advance) => advance.employeeId)
 }
 
 const normalizePayrollLineItems = (value: unknown): PayrollLineItem[] => {
