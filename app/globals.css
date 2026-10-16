@@ -35,6 +35,33 @@
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 @media print { aside, header, button { display: none !important; } main { margin: 0 !important; padding: 0 !important; } }
+.sale-receipt-print { display: none; }
+@media print {
+  @page { margin: 12mm; }
+  body * { visibility: hidden !important; }
+  .sale-receipt-print,
+  .sale-receipt-print * { visibility: visible !important; }
+  .sale-receipt-print {
+    position: fixed;
+    inset: 0;
+    display: block !important;
+    width: 100%;
+    padding: 24px;
+    background: #fff;
+    color: #111827;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .sale-receipt-print h1 { margin: 18px 0 4px; font-size: 22px; }
+  .receipt-brand { font-size: 14px; font-weight: 700; }
+  .receipt-reference { color: #4b5563; font-size: 12px; }
+  .receipt-divider { margin: 18px 0; border-top: 1px solid #d1d5db; }
+  .receipt-line,
+  .receipt-total { display: flex; justify-content: space-between; gap: 20px; padding: 7px 0; font-size: 12px; }
+  .receipt-line span,
+  .receipt-total span { color: #4b5563; }
+  .receipt-total { font-size: 15px; }
+  .receipt-thanks { margin-top: 28px; text-align: center; font-size: 11px; }
+}
 
 .login-shell { position: relative; min-height: 100vh; overflow: hidden; background: #0b1020; color: #f8fafc; isolation: isolate; }
 .login-shell::before { content: ''; position: absolute; inset: 0; z-index: -2; background: radial-gradient(circle at 14% 22%, rgba(109,40,217,.32), transparent 32%), radial-gradient(circle at 82% 78%, rgba(139,92,246,.18), transparent 34%), linear-gradient(135deg, #11182c 0%, #0b1020 54%, #0c0b18 100%); }
