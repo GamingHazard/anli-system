@@ -7,12 +7,24 @@ import * as Icons from 'lucide-react'
 import { Bell, Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, FilePlus2, Menu, Plus, Search, Settings2, Sparkles, TrendingUp, X } from 'lucide-react'
 import PayrollManagementPage from '@/components/payroll-management'
 import SalaryAdvanceManagement from '@/components/salary-advance-management'
-import { balanceForSale, chartData, cloneSeed, createId, employeeDisplayName, exportCsv, formatDate, initials, isWithinDays, loadState, money, navGroups, paidAmountForSale, paymentStateForSale, productMix, saveState, seedState, simulate, sum, type AttendanceRecord, type AttendanceStatus, type Employee, type EmployeeDraft, type ErpState, type SalePayment } from '@/lib/erp'
+import ExpenseManagement from '@/components/expense-management'
+import RawMaterialManagement from '@/components/raw-material-management'
+import ProductionManagement from '@/components/production-management'
+import AssetManagement from '@/components/asset-management'
+import DataBackup from '@/components/data-backup'
+import CompanyProfileManagement from '@/components/company-profile-management'
+import UserManagement from '@/components/user-management'
+import SecuritySettings from '@/components/security-settings'
+import Approvals from '@/components/approvals'
+import InvoiceManagement from '@/components/invoice-management'
+import LeaveManagement from '@/components/leave-management'
+import DisciplinaryLettersPage from '@/components/disciplinary-letters'
+import { balanceForSale, chartData, cloneSeed, createId, createInvoiceDraft, employeeDisplayName, exportCsv, formatDate, initials, isWithinDays, loadState, money, navGroups, paidAmountForSale, paymentStateForSale, productMix, saveState, seedState, simulate, sum, type AttendanceRecord, type AttendanceStatus, type Employee, type EmployeeDraft, type ErpState, type Invoice, type SalePayment } from '@/lib/erp'
 
 const queryClient = new QueryClient()
 const iconMap = Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>
 
-function LoginScreen({ onLogin }: { onLogin: () => void }) {
+function LoginScreen({ onLogin, companyName }: { onLogin: () => void; companyName: string }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -37,10 +49,10 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     <div className="login-orb login-orb-one" />
     <div className="login-orb login-orb-two" />
     <div className="login-grid" />
-    <div className="login-topbar"><div className="brand-lockup"><div className="brand-mark">L</div><div><strong>Lumina ERP</strong><span>Business operating system</span></div></div><div className="secure-label"><Icons.ShieldCheck /> Secure workspace</div></div>
+    <div className="login-topbar"><div className="brand-lockup"><div className="brand-mark">{companyName.charAt(0).toUpperCase()}</div><div><strong>{companyName}</strong><span>Business operating system</span></div></div><div className="secure-label"><Icons.ShieldCheck /> Secure workspace</div></div>
     <div className="login-content">
       <section className="login-intro"><div className="eyebrow"><Icons.Sparkles /> Intelligent operations</div><h1>Run your business<br /><em>with clarity.</em></h1><p>One calm, connected workspace for your people, sales, finance and operations.</p><div className="login-stat-row"><div><strong>360°</strong><span>Business visibility</span></div><div><strong>24/7</strong><span>Operational control</span></div><div><strong>01</strong><span>Unified workspace</span></div></div></section>
-      <section className="login-card"><div className="login-card-glow" /><div className="login-card-inner"><div className="login-card-heading"><span className="login-chip">WELCOME BACK</span><h2>Sign in to Lumina</h2><p>Enter your credentials to access your workspace.</p></div><form onSubmit={submit} className="login-form"><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Enter your username" autoComplete="username" required /></label><label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" required /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <Icons.EyeOff /> : <Icons.Eye />}</button></div></label>{error && <div className="login-error" role="alert"><Icons.AlertCircle />{error}</div>}<button className="login-submit" disabled={submitting}>{submitting ? 'Signing you in...' : 'Sign in to workspace'}<Icons.ArrowRight /></button></form><div className="login-card-footer"><span><Icons.LockKeyhole /> Protected workspace</span><span>Need help?</span></div></div></section>
+      <section className="login-card"><div className="login-card-glow" /><div className="login-card-inner"><div className="login-card-heading"><span className="login-chip">WELCOME BACK</span><h2>Sign in to {companyName}</h2><p>Enter your credentials to access your workspace.</p></div><form onSubmit={submit} className="login-form"><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Enter your username" autoComplete="username" required /></label><label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" autoComplete="current-password" required /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <Icons.EyeOff /> : <Icons.Eye />}</button></div></label>{error && <div className="login-error" role="alert"><Icons.AlertCircle />{error}</div>}<button className="login-submit" disabled={submitting}>{submitting ? 'Signing you in...' : 'Sign in to workspace'}<Icons.ArrowRight /></button></form><div className="login-card-footer"><span><Icons.LockKeyhole /> Protected workspace</span><span>Need help?</span></div></div></section>
     </div>
     <div className="login-footer"><span>© 2026 Lumina ERP</span><span>UGX · Africa/Kampala</span></div>
   </main>
@@ -55,10 +67,11 @@ function App() {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileNav, setMobileNav] = useState(false)
   const [state, setState] = useState<ErpState>(loadState)
-  useEffect(() => { const handler = (event: Event) => { const detail = (event as CustomEvent<{ type: string; id: string }>).detail; setSelectedId(detail.id); setActive(detail.type === 'employee' ? 'Employee Profile Details' : 'Customer Details') }; window.addEventListener('erp:view', handler); return () => window.removeEventListener('erp:view', handler) }, [])
+  useEffect(() => { const handler = (event: Event) => { const detail = (event as CustomEvent<{ type: string; id: string }>).detail; if (detail.type === 'invoice') { setActive('Invoicing'); return } setSelectedId(detail.id); setActive(detail.type === 'employee' ? 'Employee Profile Details' : 'Customer Details') }; window.addEventListener('erp:view', handler); return () => window.removeEventListener('erp:view', handler) }, [])
   const updateState = (next: ErpState) => { setState(next); saveState(next); queryClient.invalidateQueries() }
-  if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />
-  return <QueryClientProvider client={queryClient}><div className="min-h-screen bg-[#f7f8fc] text-slate-900"><Sidebar active={active} setActive={(value) => { setActive(value); setMobileNav(false) }} collapsed={collapsed} setCollapsed={setCollapsed} mobileNav={mobileNav} setMobileNav={setMobileNav} onReset={() => updateState(cloneSeed())} /><div className={`transition-[margin] duration-200 ${collapsed ? 'lg:ml-[76px]' : 'lg:ml-[252px]'}`}><Header active={active} setMobileNav={setMobileNav} /><main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">{active === 'Dashboard' ? <Dashboard state={state} setActive={setActive} /> : active === 'Credit Sales' ? <CreditSalesPage state={state} updateState={updateState} /> : active === 'Payroll Management' ? <PayrollManagementPage state={state} updateState={updateState} initialRunId={selectedPayrollRunId} onViewEmployee={(id) => { setSelectedId(id); setActive('Employee Profile Details') }} /> : active === 'Salary Advance Management' ? <SalaryAdvanceManagement state={state} updateState={updateState} initialAdvanceId={selectedAdvanceId} onViewEmployee={(id) => { setSelectedId(id); setActive('Employee Profile Details') }} /> : active === 'Employee Profile Details' ? <EmployeeDetails employee={state.employees.find((item) => item.id === selectedId) || state.employees[0]} state={state} updateState={updateState} onBack={() => setActive('Employee Profiles')} onViewPayrollRun={(id) => { setSelectedPayrollRunId(id); setActive('Payroll Management') }} onViewAdvance={(id) => { setSelectedAdvanceId(id); setActive('Salary Advance Management') }} /> : active === 'Customer Details' ? <CustomerDetails customer={state.customers.find((item) => item.id === selectedId) || state.customers[0]} state={state} onBack={() => setActive('Customer Management')} /> : active === 'Employee Profiles' ? <EmployeeDirectory state={state} updateState={updateState} onView={(id) => { setSelectedId(id); setActive('Employee Profile Details') }} /> : active === 'Attendance Management' ? <AttendancePage state={state} updateState={updateState} /> : <ModulePage active={active} state={state} updateState={updateState} onView={(id) => { setSelectedId(id); setActive(active === 'Employee Profiles' ? 'Employee Profile Details' : 'Customer Details') }} />}</main></div></div></QueryClientProvider>
+  const companyName = state.companyProfile.tradingName || state.companyProfile.legalName || 'Lumina ERP'
+  if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} companyName={companyName} />
+  return <QueryClientProvider client={queryClient}><div className="min-h-screen bg-[#f7f8fc] text-slate-900"><Sidebar active={active} setActive={(value) => { setActive(value); setMobileNav(false) }} collapsed={collapsed} setCollapsed={setCollapsed} mobileNav={mobileNav} setMobileNav={setMobileNav} onReset={() => updateState(cloneSeed())} companyName={companyName} /><div className={`transition-[margin] duration-200 ${collapsed ? 'lg:ml-[76px]' : 'lg:ml-[252px]'}`}><Header active={active} setMobileNav={setMobileNav} /><main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">{active === 'Dashboard' ? <Dashboard state={state} setActive={setActive} /> : active === 'Credit Sales' ? <CreditSalesPage state={state} updateState={updateState} /> : active === 'Payroll Management' ? <PayrollManagementPage state={state} updateState={updateState} initialRunId={selectedPayrollRunId} onViewEmployee={(id) => { setSelectedId(id); setActive('Employee Profile Details') }} /> : active === 'Salary Advance Management' ? <SalaryAdvanceManagement state={state} updateState={updateState} initialAdvanceId={selectedAdvanceId} onViewEmployee={(id) => { setSelectedId(id); setActive('Employee Profile Details') }} /> : active === 'Employee Profile Details' ? <EmployeeDetails employee={state.employees.find((item) => item.id === selectedId) || state.employees[0]} state={state} updateState={updateState} onBack={() => setActive('Employee Profiles')} onViewPayrollRun={(id) => { setSelectedPayrollRunId(id); setActive('Payroll Management') }} onViewAdvance={(id) => { setSelectedAdvanceId(id); setActive('Salary Advance Management') }} /> : active === 'Customer Details' ? <CustomerDetails customer={state.customers.find((item) => item.id === selectedId) || state.customers[0]} state={state} onBack={() => setActive('Customer Management')} /> : active === 'Employee Profiles' ? <EmployeeDirectory state={state} updateState={updateState} onView={(id) => { setSelectedId(id); setActive('Employee Profile Details') }} /> : active === 'Attendance Management' ? <AttendancePage state={state} updateState={updateState} /> : <ModulePage active={active} state={state} updateState={updateState} onView={(id) => { setSelectedId(id); setActive(active === 'Employee Profiles' ? 'Employee Profile Details' : 'Customer Details') }} />}</main></div></div></QueryClientProvider>
 }
 
 function companyWorkDate() {
@@ -172,9 +185,9 @@ function AttendanceDialog({ employees, records, workDate, onClose, onSave }: { e
   </section></div>;
 }
 
-function Sidebar({ active, setActive, collapsed, setCollapsed, mobileNav, setMobileNav, onReset }: { active: string; setActive: (value: string) => void; collapsed: boolean; setCollapsed: (value: boolean) => void; mobileNav: boolean; setMobileNav: (value: boolean) => void; onReset: () => void }) {
+function Sidebar({ active, setActive, collapsed, setCollapsed, mobileNav, setMobileNav, onReset, companyName }: { active: string; setActive: (value: string) => void; collapsed: boolean; setCollapsed: (value: boolean) => void; mobileNav: boolean; setMobileNav: (value: boolean) => void; onReset: () => void; companyName: string }) {
   return <><div className={`fixed inset-0 z-40 bg-slate-950/30 lg:hidden ${mobileNav ? 'block' : 'hidden'}`} onClick={() => setMobileNav(false)} /><aside className={`fixed inset-y-0 left-0 z-50 flex w-[252px] flex-col border-r border-slate-200 bg-white transition-transform duration-200 ${mobileNav ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'lg:w-[76px]' : 'lg:translate-x-0'} lg:translate-x-0`}>
-    <div className="flex h-[76px] items-center gap-3 border-b border-slate-100 px-5"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#6d28d9] text-sm font-bold text-white shadow-lg shadow-purple-200">L</div>{!collapsed && <div><div className="text-[15px] font-bold tracking-tight">Lumina ERP</div><div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Business suite</div></div>}<button aria-label="Close navigation" className="ml-auto lg:hidden" onClick={() => setMobileNav(false)}><X className="size-5 text-slate-400" /></button></div>
+    <div className="flex h-[76px] items-center gap-3 border-b border-slate-100 px-5"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#6d28d9] text-sm font-bold text-white shadow-lg shadow-purple-200">{companyName.charAt(0).toUpperCase()}</div>{!collapsed && <div className="min-w-0"><div className="max-w-40 truncate text-[15px] font-bold tracking-tight" title={companyName}>{companyName}</div><div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Business suite</div></div>}<button aria-label="Close navigation" className="ml-auto lg:hidden" onClick={() => setMobileNav(false)}><X className="size-5 text-slate-400" /></button></div>
     <nav className="flex-1 overflow-y-auto px-3 py-5">{navGroups.map(group => <div key={group.label} className="mb-5"><div className={`mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 ${collapsed ? 'lg:hidden' : ''}`}>{group.label}</div>{group.items.map(item => { const Icon = iconMap[item.icon] || LayoutFallback; return <button key={item.label} title={collapsed ? item.label : undefined} onClick={() => setActive(item.label)} className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${active === item.label ? 'bg-[#f1eafd] text-[#6d28d9]' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}><Icon className={`size-[17px] shrink-0 ${active === item.label ? 'text-[#6d28d9]' : 'text-slate-400 group-hover:text-slate-600'}`} />{!collapsed && <span className="truncate">{item.label}</span>}{!collapsed && active === item.label && <span className="ml-auto size-1.5 rounded-full bg-[#6d28d9]" />}</button> })}</div>)}</nav>
     <div className={`border-t border-slate-100 p-3 ${collapsed ? 'lg:flex lg:justify-center' : ''}`}><button title="Reset demo data" onClick={onReset} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-medium text-slate-500 hover:bg-slate-50"><Settings2 className="size-[17px] text-slate-400" />{!collapsed && <span>Reset demo data</span>}</button><div className={`mt-3 flex items-center gap-3 rounded-xl bg-slate-50 p-3 ${collapsed ? 'lg:hidden' : ''}`}><div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#e9ddff] text-[11px] font-bold text-[#6d28d9]">SN</div><div className="min-w-0"><div className="truncate text-xs font-semibold">Sarah Namirembe</div><div className="truncate text-[10px] text-slate-400">Administrator</div></div><ChevronDown className="ml-auto size-3.5 text-slate-400" /></div></div>
   </aside></>
@@ -200,7 +213,6 @@ const employeeKpiDemo = {
   missingFields: 5,
   missingDocuments: 6,
   onLeaveToday: 3,
-  punishmentEvents: { warned: 6, suspended: 2, terminated: 1 },
 };
 
 function EmployeeDirectory({ state, updateState, onView }: { state: ErpState; updateState: (next: ErpState) => void; onView: (id: string) => void }) {
@@ -251,9 +263,10 @@ function EmployeeDirectory({ state, updateState, onView }: { state: ErpState; up
         <p className="mt-2 text-[9px] text-slate-400">Fields and documents can overlap.</p>
       </article>
       <article className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex items-center justify-between"><h3 className="text-xs font-semibold text-slate-600">Leave & punishment</h3><span className="rounded bg-slate-100 px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">Demo data</span></div>
-        <div className="mt-2 flex items-baseline gap-2"><span className="text-2xl font-bold tracking-tight text-slate-900">{employeeKpiDemo.onLeaveToday}</span><span className="text-xs text-slate-500">on approved leave today</span></div>
-        <div className="mt-3 border-t border-slate-100 pt-3"><div className="mb-2 text-[10px] font-semibold uppercase text-slate-400">Punishment events</div><div className="grid grid-cols-3 gap-2 text-center"><div className="rounded bg-amber-50 px-1.5 py-2"><div className="text-sm font-bold text-amber-800">{employeeKpiDemo.punishmentEvents.warned}</div><div className="text-[9px] text-amber-700">Warned</div></div><div className="rounded bg-orange-50 px-1.5 py-2"><div className="text-sm font-bold text-orange-800">{employeeKpiDemo.punishmentEvents.suspended}</div><div className="text-[9px] text-orange-700">Suspended</div></div><div className="rounded bg-rose-50 px-1.5 py-2"><div className="text-sm font-bold text-rose-800">{employeeKpiDemo.punishmentEvents.terminated}</div><div className="text-[9px] text-rose-700">Terminated</div></div></div></div>
+        <div className="flex items-center justify-between"><h3 className="text-xs font-semibold text-slate-600">Employees on leave</h3><span className="rounded bg-slate-100 px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">Demo data</span></div>
+        <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{employeeKpiDemo.onLeaveToday}</div>
+        <p className="mt-1 text-[11px] text-slate-500">On approved leave today</p>
+        <p className="mt-3 border-t border-slate-100 pt-3 text-[10px] text-slate-400">Disciplinary letters are managed separately.</p>
       </article>
     </section>
     {state.employeeDrafts.length > 0 && <section className="mb-4 overflow-hidden rounded-xl border border-amber-200 bg-white">
@@ -497,6 +510,10 @@ function EmployeeProfile({ employee, state, updateState, onBack, onViewPayrollRu
       const amountRepaid = (advance: ErpState["salaryAdvances"][number]) => advance.repayments.reduce((total, repayment) => total + repayment.amount, 0);
       const outstanding = (advance: ErpState["salaryAdvances"][number]) => Math.max(0, (advance.disbursement?.amount ?? 0) - amountRepaid(advance));
       return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold">Salary advances</h3><p className="mt-1 text-xs text-slate-500">Advance requests, disbursements, and recorded repayments linked to this employee.</p></div>{employeeAdvances.length ? <div className="overflow-x-auto"><table className="w-full min-w-190 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{["Advance", "Requested", "Disbursed", "Repaid", "Balance", "Frequency", "Status"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{employeeAdvances.map((advance) => <tr key={advance.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3"><button type="button" onClick={() => onViewAdvance(advance.id)} className="font-semibold text-[#087e75] hover:underline">{advance.reference}</button><span className="mt-1 block text-[10px] text-slate-400">{formatDate(advance.requestedAt.slice(0, 10))}</span></td><td className="px-4 py-3">{money(advance.requestedAmount)}</td><td className="px-4 py-3">{advance.disbursement ? money(advance.disbursement.amount) : "—"}</td><td className="px-4 py-3">{money(amountRepaid(advance))}</td><td className="px-4 py-3 font-semibold">{advance.disbursement ? money(outstanding(advance)) : "—"}</td><td className="px-4 py-3">{advance.approvedFrequency ?? advance.proposedFrequency}</td><td className="px-4 py-3">{advance.status}</td></tr>)}</tbody></table></div> : emptyHistory("Salary advances")}</section>;
+    }
+    if (activeTab === "leave") {
+      const employeeLeave = state.leaveRequests.filter((request) => request.employeeId === employee.id).sort((left, right) => right.startDate.localeCompare(left.startDate));
+      return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold">Leave history</h3><p className="mt-1 text-xs text-slate-500">Submitted and reviewed leave requests linked to this employee.</p></div>{employeeLeave.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{["Request", "Leave type", "Dates", "Working days", "Handover", "Status"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{employeeLeave.map((request) => <tr key={request.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3 font-semibold text-slate-800">{request.reference}<span className="mt-1 block text-[10px] font-normal text-slate-400">Submitted {formatDate(request.requestedAt.slice(0, 10))}</span></td><td className="px-4 py-3">{request.leaveType === "Other" ? request.otherLeaveType : request.leaveType}</td><td className="px-4 py-3">{formatDate(request.startDate)} – {formatDate(request.endDate)}</td><td className="px-4 py-3">{request.requestedDays}</td><td className="px-4 py-3">{request.handoverName}</td><td className="px-4 py-3">{request.status}</td></tr>)}</tbody></table></div> : emptyHistory("Leave history")}</section>;
     }
     const historyNames: Partial<Record<EmployeeProfileTab, string>> = { attendance: "Attendance", payroll: "Payroll history", advances: "Salary advances", leave: "Leave history", punishment: "Punishment history" };
     return emptyHistory(historyNames[activeTab] ?? "HR history");
@@ -1246,21 +1263,26 @@ function ModulePage({
     document.addEventListener("pointerdown", handleOutsideClick);
     return () => document.removeEventListener("pointerdown", handleOutsideClick);
   }, [showOrderFilters]);
+  if (active === "Expenses") return <ExpenseManagement state={state} updateState={updateState} />;
+  if (active === "Raw Material Management") return <RawMaterialManagement state={state} updateState={updateState} />;
+  if (active === "Production Management") return <ProductionManagement state={state} updateState={updateState} />;
+  if (active === "Assets Management") return <AssetManagement state={state} updateState={updateState} />;
+  if (active === "Data Backup") return <DataBackup />;
+  if (active === "Company Profile Management") return <CompanyProfileManagement profile={state.companyProfile} onSave={(companyProfile) => updateState({ ...state, companyProfile })} />;
+  if (active === "User Management") return <UserManagement />;
+  if (active === "Security Settings") return <SecuritySettings />;
+  if (active === "Approvals") return <Approvals state={state} updateState={updateState} />;
   const kind = active.split(" ")[0];
   const data =
     active === "Sales"
       ? state.sales
       : active === "Orders"
         ? state.orders
-        : active === "Expenses"
-          ? state.expenses
-          : active === "Customer Management"
-            ? state.customers
-            : active === "Employee Profiles"
-              ? state.employees
-              : active === "Raw Material Management"
-                ? state.materials
-                : state.activities;
+        : active === "Customer Management"
+          ? state.customers
+          : active === "Employee Profiles"
+            ? state.employees
+            : state.activities;
   const today = new Date().toISOString().slice(0, 10);
   const periodStartDate = new Date(`${today}T00:00:00.000Z`);
   if (salesPeriod === "week") {
@@ -1364,8 +1386,7 @@ function ModulePage({
       const customerName = customerId
         ? state.customers.find((customer) => customer.id === customerId)?.name || ""
         : "Walk-in customer";
-      next.sales = [
-        {
+      const sale: ErpState["sales"][number] = {
           id: createId("S"),
           reference: createId("SAL"),
           date: new Date().toISOString().slice(0, 10),
@@ -1380,9 +1401,10 @@ function ModulePage({
           paymentTerms: paymentTerms as
             "Same-day" | "Credit",
           dueDate: String(paymentTerms === "Credit" ? form.get("dueDate") || "" : "") || undefined,
-        },
-        ...state.sales,
-      ];
+        };
+      next.sales = [sale, ...state.sales];
+      const saleCustomer = state.customers.find((customer) => customer.id === sale.customerId);
+      next.invoices = [createInvoiceDraft(sale, saleCustomer, state.companyProfile), ...state.invoices];
     }
     if (active === "Orders") {
       const submittedItems = JSON.parse(String(form.get("items") || "[]")) as ErpState["orders"][number]["items"];
@@ -1434,20 +1456,6 @@ function ModulePage({
         ...state.orders,
       ];
     }
-    if (active === "Expenses")
-      next.expenses = [
-        {
-          id: createId("EX"),
-          reference: createId("EXP"),
-          category: String(form.get("category") || "General"),
-          description: String(form.get("description") || "New expense"),
-          amount: Number(form.get("amount") || 0),
-          date: new Date().toISOString().slice(0, 10),
-          status: "Pending",
-          department: "Operations",
-        },
-        ...state.expenses,
-      ];
     if (active === "Customer Management")
       next.customers = [
         {
@@ -1480,8 +1488,17 @@ function ModulePage({
     setToast(`${kind} record saved successfully`);
     setTimeout(() => setToast(""), 2600);
   };
+  if (active === "Leave Management") {
+    return <LeaveManagement state={state} updateState={updateState} onViewEmployee={(id) => window.dispatchEvent(new CustomEvent("erp:view", { detail: { type: "employee", id } }))} />;
+  }
+  if (active === "Disciplinary Letters") {
+    return <DisciplinaryLettersPage state={state} />;
+  }
   if (active === "Customer Management") {
     return <CustomerManagementPage state={state} updateState={updateState} onView={onView} />;
+  }
+  if (active === "Invoicing") {
+    return <InvoiceManagement state={state} updateState={updateState} />;
   }
   return (
     <div className="animate-in fade-in duration-300">
@@ -1810,6 +1827,8 @@ function ModulePage({
                       key={item.id || index}
                       item={item}
                       active={active}
+                      invoice={active === "Sales" ? state.invoices.find((invoice) => invoice.saleId === item.id) : undefined}
+                      companyName={state.companyProfile.tradingName || state.companyProfile.legalName || "Lumina ERP"}
                       queuePosition={index + 1}
                       onOrderStatusChange={(orderId, status) => updateOrder(orderId, { status, completedAt: status === "Completed" ? new Date().toISOString() : undefined })}
                       onArchiveOrder={(orderId, archived) => updateOrder(orderId, { archivedAt: archived ? new Date().toISOString() : undefined })}
@@ -1995,25 +2014,25 @@ function tableHeaders(active: string) {
       "Total",
       "Priority / status",
     ];
-  if (active === "Expenses")
-    return ["Reference", "Description", "Category", "Date", "Amount", "Status"];
   if (active === "Customer Management")
     return ["Customer", "Type", "Contact", "Transactions", "Status"];
   if (active === "Employee Profiles")
     return ["Employee", "Department", "Role", "Category", "Salary", "Status"];
-  if (active === "Raw Material Management")
-    return ["Material", "Code", "Category", "Available", "Location", "Stock"];
   return ["Reference / name", "Module", "Details", "Date", "Owner", "Status"];
 }
 function TableRow({
   item,
   active,
+  invoice,
+  companyName,
   queuePosition,
   onOrderStatusChange,
   onArchiveOrder,
 }: {
   item: any;
   active: string;
+  invoice?: Invoice;
+  companyName: string;
   queuePosition?: number;
   onOrderStatusChange?: (orderId: string, status: ErpState["orders"][number]["status"]) => void;
   onArchiveOrder?: (orderId: string, archived: boolean) => void;
@@ -2081,15 +2100,6 @@ function TableRow({
         <Status text={item.status} />
       </span>,
     ];
-  else if (active === "Expenses")
-    cells = [
-      <span className="font-semibold text-slate-700">{item.reference}</span>,
-      item.description,
-      item.category,
-      formatDate(item.date),
-      money(item.amount),
-      <Status text={item.status} />,
-    ];
   else if (active === "Customer Management")
     cells = [
       <button
@@ -2136,15 +2146,6 @@ function TableRow({
       item.category,
       money(item.salary),
       <Status text={item.status} />,
-    ];
-  else if (active === "Raw Material Management")
-    cells = [
-      <span className="font-semibold text-slate-700">{item.name}</span>,
-      item.code,
-      item.category,
-      `${item.quantity} ${item.unit}`,
-      item.location,
-      <Status text={item.quantity <= item.threshold ? "Review" : "Active"} />,
     ];
   else
     cells = [
@@ -2255,6 +2256,8 @@ function TableRow({
         {active === "Sales" && showSalesDetails && (
           <SalesDetailsDialog
             sale={item}
+            invoice={invoice}
+            companyName={companyName}
             onClose={() => setShowSalesDetails(false)}
           />
         )}
@@ -2313,9 +2316,13 @@ function OrderDetailsDialog({
 
 function SalesDetailsDialog({
   sale,
+  invoice,
+  companyName,
   onClose,
 }: {
   sale: ErpState["sales"][number];
+  invoice?: Invoice;
+  companyName: string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -2385,6 +2392,7 @@ function SalesDetailsDialog({
           >
             Close
           </button>
+          {invoice && <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("erp:view", { detail: { type: "invoice", id: invoice.id } }))} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Icons.ReceiptText className="size-4" />Open invoice draft</button>}
           <button
             type="button"
             onClick={() => window.print()}
@@ -2394,7 +2402,7 @@ function SalesDetailsDialog({
           </button>
         </div>
         <div className="sale-receipt-print" aria-hidden="true">
-          <div className="receipt-brand">Lumina ERP</div>
+          <div className="receipt-brand">{companyName}</div>
           <h1>Sales receipt</h1>
           <div className="receipt-reference">{sale.reference}</div>
           <div className="receipt-divider" />
@@ -2448,24 +2456,18 @@ function FormDialog({
           ["paymentTerms", "Payment terms", "Same-day"],
           ["dueDate", "Credit due date", ""],
         ]
-      : active === "Expenses"
+      : active === "Customer Management"
         ? [
-            ["description", "Description", "e.g. Factory supplies"],
-            ["category", "Category", "Supplies"],
-            ["amount", "Amount (UGX)", "0"],
+            ["name", "Customer or business name", "New customer"],
+            ["phone", "Telephone", "+256 700 000 000"],
+            ["email", "Email address", "customer@example.com"],
           ]
-        : active === "Customer Management"
-          ? [
-              ["name", "Customer or business name", "New customer"],
-              ["phone", "Telephone", "+256 700 000 000"],
-              ["email", "Email address", "customer@example.com"],
-            ]
-          : [
-              ["name", "Full name", "New team member"],
-              ["department", "Department", "Operations"],
-              ["role", "Job title", "Team member"],
-              ["salary", "Salary / wage (UGX)", "0"],
-            ];
+        : [
+            ["name", "Full name", "New team member"],
+            ["department", "Department", "Operations"],
+            ["role", "Job title", "Team member"],
+            ["salary", "Salary / wage (UGX)", "0"],
+          ];
 
   return (
     <FormDialogShell active={active} onClose={onClose} onSubmit={onSubmit}>

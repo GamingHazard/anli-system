@@ -1,0 +1,110 @@
+'use client'
+
+import { useMemo, useState } from 'react'
+import * as Icons from 'lucide-react'
+import { decideLeaveRequest } from '@/lib/leave'
+import { decideExpense, decideSalaryAdvance, approvePayrollRun } from '@/lib/approvals'
+import { formatDate, money, type ErpState } from '@/lib/erp'
+
+type Props = { state: ErpState; updateState: (next: ErpState) => void }
+type Source = 'Leave' | 'Salary advance' | 'Payroll' | 'Expense'
+type ApprovalStatus = 'Awaiting review' | 'Approved' | 'Rejected'
+type ApprovalItem = { id: string; source: Source; reference: string; requester: string; submittedAt: string; summary: string; amount?: number; status: ApprovalStatus; detail: string; recordId: string; canApprove?: boolean }
+type View = 'Needs review' | 'History'
+
+const approver = 'Sarah Namirembe'
+const inputClass = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-primary focus:ring-2 focus:ring-ring/30'
+const statusTone: Record<ApprovalStatus, string> = { 'Awaiting review': 'bg-amber-50 text-amber-800', Approved: 'bg-emerald-50 text-emerald-700', Rejected: 'bg-rose-50 text-rose-700' }
+
+function approvalItems(state: ErpState): ApprovalItem[] {
+  const pending: ApprovalItem[] = [
+    ...state.leaveRequests.filter((request) => request.status === 'Pending').map((request) => ({ id: `leave-${request.id}`, recordId: request.id, source: 'Leave' as const, reference: request.reference, requester: request.employeeName, submittedAt: request.requestedAt, summary: `${request.leaveType === 'Other' ? request.otherLeaveType : request.leaveType} · ${request.requestedDays} working days · ${formatDate(request.startDate)} to ${formatDate(request.endDate)}`, status: 'Awaiting review' as const, detail: `${request.reason}\nHandover: ${request.handoverName} · ${request.department}` })),
+    ...state.salaryAdvances.filter((advance) => advance.status === 'Pending review').map((advance) => ({ id: `advance-${advance.id}`, recordId: advance.id, source: 'Salary advance' as const, reference: advance.reference, requester: advance.employeeName, submittedAt: advance.requestedAt, summary: `Requested ${money(advance.requestedAmount)} · ${advance.proposedFrequency} repayment`, amount: advance.requestedAmount, status: 'Awaiting review' as const, detail: `${advance.reason}\nProposed installment: ${money(advance.proposedInstallmentAmount)} · First due: ${formatDate(advance.proposedFirstDueDate)}` })),
+    ...state.payrollRuns.filter((run) => run.status === 'In review').map((run) => { const needsReview = run.payslips.filter((slip) => slip.reviewStatus === 'Needs review').length; return { id: `payroll-${run.id}`, recordId: run.id, source: 'Payroll' as const, reference: run.reference, requester: run.createdBy || 'Payroll preparer not recorded', submittedAt: run.updatedAt, summary: `${run.frequency} payroll · ${formatDate(run.periodStart)} to ${formatDate(run.periodEnd)} · ${run.payslips.length} payslips`, status: 'Awaiting review' as const, canApprove: needsReview === 0, detail: `${needsReview} payslips need setup review. Approval requires all payslips marked Ready.` } }),
+    ...state.expenses.filter((expense) => expense.status === 'Pending approval').map((expense) => ({ id: `expense-${expense.id}`, recordId: expense.id, source: 'Expense' as const, reference: expense.reference, requester: expense.requestedBy || 'Requester not recorded', submittedAt: expense.createdAt || `${expense.date}T12:00:00.000Z`, summary: `${expense.payee || expense.description} · ${expense.category} · ${expense.department}`, amount: expense.amount, status: 'Awaiting review' as const, detail: `${expense.description}\nDate: ${formatDate(expense.date)} · Type: ${expense.expenseType || 'Not specified'} · Receipts: ${expense.attachments?.length ?? 0}` })),
+  ]
+
+  const history: ApprovalItem[] = [
+    ...state.leaveRequests.flatMap((request) => request.decisions.filter((decision) => decision.decision === 'Approved' || decision.decision === 'Rejected').map((decision) => ({ id: `leave-decision-${decision.id}`, recordId: request.id, source: 'Leave' as const, reference: request.reference, requester: request.employeeName, submittedAt: decision.at, summary: `${request.leaveType === 'Other' ? request.otherLeaveType : request.leaveType} · ${request.requestedDays} days`, status: decision.decision as ApprovalStatus, detail: `${decision.actor}${decision.note ? `\n${decision.note}` : ''}` }))),
+    ...state.salaryAdvances.filter((advance) => ['Approved', 'Rejected'].includes(advance.status)).map((advance) => ({ id: `advance-decision-${advance.id}`, recordId: advance.id, source: 'Salary advance' as const, reference: advance.reference, requester: advance.employeeName, submittedAt: advance.decisionAt || advance.updatedAt, summary: `${money(advance.approvedAmount ?? advance.requestedAmount)} · ${advance.status === 'Approved' ? 'approved terms' : advance.rejectionReason || 'Rejected'}`, amount: advance.approvedAmount ?? advance.requestedAmount, status: advance.status as ApprovalStatus, detail: `${advance.decisionBy || 'Reviewer not recorded'}${advance.rejectionReason ? `\n${advance.rejectionReason}` : ''}` })),
+    ...state.payrollRuns.filter((run) => run.status === 'Approved').map((run) => ({ id: `payroll-decision-${run.id}`, recordId: run.id, source: 'Payroll' as const, reference: run.reference, requester: run.createdBy || 'Payroll preparer not recorded', submittedAt: run.approvedAt || run.updatedAt, summary: `${run.frequency} payroll · ${run.payslips.length} payslips`, status: 'Approved' as const, detail: `${run.approvedBy || 'Approver not recorded'}${run.approvalNote ? `\n${run.approvalNote}` : ''}` })),
+    ...state.expenses.flatMap((expense) => (expense.decisions ?? []).map((decision) => ({ id: `expense-decision-${decision.id}`, recordId: expense.id, source: 'Expense' as const, reference: expense.reference, requester: expense.requestedBy || 'Requester not recorded', submittedAt: decision.at, summary: `${expense.payee || expense.description} · ${money(expense.amount)}`, amount: expense.amount, status: decision.decision as ApprovalStatus, detail: `${decision.actor}${decision.note ? `\n${decision.note}` : ''}` }))),
+  ]
+  return [...pending, ...history].sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
+}
+
+export default function Approvals({ state, updateState }: Props) {
+  const [view, setView] = useState<View>('Needs review')
+  const [approver, setApprover] = useState('David Okello')
+  const [sourceFilter, setSourceFilter] = useState<'All sources' | Source>('All sources')
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<ApprovalItem | null>(null)
+  const [decisionNote, setDecisionNote] = useState('')
+  const [message, setMessage] = useState('')
+  const items = useMemo(() => approvalItems(state), [state])
+  const pending = items.filter((item) => item.status === 'Awaiting review')
+  const history = items.filter((item) => item.status !== 'Awaiting review')
+  const visible = (view === 'Needs review' ? pending : history).filter((item) => {
+    const searchable = `${item.reference} ${item.requester} ${item.summary} ${item.source}`.toLowerCase()
+    return (sourceFilter === 'All sources' || item.source === sourceFilter) && searchable.includes(search.trim().toLowerCase())
+  })
+  const actionable = selected?.status === 'Awaiting review'
+  const openItem = (item: ApprovalItem) => { setSelected(item); setDecisionNote(''); setMessage('') }
+
+  const decide = (decision: 'Approved' | 'Rejected') => {
+    if (!selected || !actionable) return
+    if (decision === 'Rejected' && !decisionNote.trim()) { setMessage('Add a reason before rejecting this request.'); return }
+    if (selected.requester.trim().toLowerCase() === approver.toLowerCase()) { setMessage('Self-approval is not allowed. Select a different reviewer.'); return }
+    if (selected.source === 'Leave') {
+      const request = state.leaveRequests.find((item) => item.id === selected.recordId)
+      if (!request || request.status !== 'Pending') { setMessage('This request is no longer awaiting review.'); return }
+      updateState({ ...state, leaveRequests: state.leaveRequests.map((item) => item.id === request.id ? decideLeaveRequest(item, decision, approver, decisionNote) : item) })
+    } else if (selected.source === 'Salary advance') {
+      const advance = state.salaryAdvances.find((item) => item.id === selected.recordId)
+      if (!advance || advance.status !== 'Pending review') { setMessage('This request is no longer awaiting review.'); return }
+      updateState({ ...state, salaryAdvances: state.salaryAdvances.map((item) => item.id === advance.id ? decideSalaryAdvance(item, decision, approver, decisionNote) : item) })
+    } else if (selected.source === 'Payroll') {
+      if (decision === 'Rejected') { setMessage('Payroll rejection workflow is not implemented yet. Return the run to its source module for correction.'); return }
+      const run = state.payrollRuns.find((item) => item.id === selected.recordId)
+      if (!run || run.status !== 'In review') { setMessage('This payroll run is no longer awaiting review.'); return }
+      const approved = approvePayrollRun(run, approver, decisionNote)
+      if (approved === run) { setMessage('Payroll approval is blocked until every payslip is marked Ready.'); return }
+      updateState({ ...state, payrollRuns: state.payrollRuns.map((item) => item.id === run.id ? approved : item) })
+    } else {
+      const expense = state.expenses.find((item) => item.id === selected.recordId)
+      if (!expense || expense.status !== 'Pending approval') { setMessage('This expense is no longer awaiting review.'); return }
+      updateState({ ...state, expenses: state.expenses.map((item) => item.id === expense.id ? decideExpense(item, decision, approver, decisionNote) : item) })
+    }
+    setSelected(null)
+    setMessage('')
+  }
+
+  return <div className="animate-in fade-in duration-300">
+    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Overview</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">Approvals</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Review pending requests across HR, payroll, finance, and operations.</p></div><label className="text-[10px] font-semibold text-slate-600">Simulated reviewer<select aria-label="Simulated approval reviewer" value={approver} onChange={(event) => setApprover(event.target.value)} className={`${inputClass} mt-1 block`}><option>David Okello</option><option>Sarah Namirembe</option></select></label></header>
+    <div role="status" className="mb-5 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><Icons.Info className="mt-0.5 size-4 shrink-0" /><p>This local prototype updates the source records, but reviewer identity and authorization are not secure. Backend role checks, self-approval protection, and two-person approval for security actions are still required.</p></div>
+
+    <section aria-label="Approval summary" className="mb-5 grid gap-3 sm:grid-cols-3"><SummaryMetric title="Needs review" value={pending.length} icon="ClipboardList" tone="amber" /><SummaryMetric title="Approved" value={history.filter((item) => item.status === 'Approved').length} icon="BadgeCheck" tone="green" /><SummaryMetric title="Rejected" value={history.filter((item) => item.status === 'Rejected').length} icon="CircleX" tone="rose" /></section>
+
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div role="tablist" aria-label="Approval views" className="flex gap-1 border-b border-slate-200 px-4 pt-2">{(['Needs review', 'History'] as View[]).map((item) => <button key={item} type="button" role="tab" aria-selected={view === item} onClick={() => setView(item)} className={`inline-flex items-center gap-2 border-b-2 px-3 py-3 text-xs font-semibold ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item}<span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px]">{item === 'Needs review' ? pending.length : history.length}</span></button>)}</div>
+      <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between"><div><h3 className="text-sm font-bold text-slate-900">{view}</h3><p className="mt-1 text-xs text-slate-500">{visible.length} {view === 'Needs review' ? 'request' : 'decision'}{visible.length === 1 ? '' : 's'}</p></div><div className="flex flex-col gap-2 sm:flex-row"><label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><Icons.Search className="size-4 text-slate-400" /><input aria-label="Search approvals" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Reference, requester, details" className="w-full bg-transparent text-xs outline-none sm:w-56" /></label><select aria-label="Filter approvals by source" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)} className={inputClass}><option>All sources</option>{(['Leave', 'Salary advance', 'Payroll', 'Expense'] as Source[]).map((source) => <option key={source}>{source}</option>)}</select></div></div>
+      {visible.length ? <div className="overflow-x-auto"><table className="w-full min-w-190 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Request', 'Requester', 'Summary', 'Submitted', 'Status', ''].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{visible.map((item) => <tr key={item.id} className="border-t border-slate-100 text-slate-600 hover:bg-slate-50/70"><td className="px-4 py-3"><div className="font-semibold text-slate-800">{item.reference}</div><span className="mt-1 block text-[10px] text-slate-400">{item.source}</span></td><td className="px-4 py-3">{item.requester}</td><td className="max-w-80 px-4 py-3"><div className="truncate font-medium text-slate-700">{item.summary}</div><div className="mt-1 truncate text-[10px] text-slate-400">{item.detail.split('\n')[0]}</div></td><td className="whitespace-nowrap px-4 py-3 text-[10px] text-slate-500">{formatDate(item.submittedAt.slice(0, 10))}</td><td className="px-4 py-3"><span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone[item.status]}`}>{item.status}</span></td><td className="px-4 py-3 text-right"><button type="button" onClick={() => openItem(item)} className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">{item.status === 'Awaiting review' ? 'Review' : 'Details'}<Icons.ChevronRight className="size-3.5" /></button></td></tr>)}</tbody></table></div> : <div className="px-5 py-14 text-center"><Icons.Inbox className="mx-auto size-5 text-slate-300" /><h4 className="mt-3 text-sm font-semibold text-slate-800">{view === 'Needs review' ? 'Nothing needs review' : 'No approval history yet'}</h4><p className="mx-auto mt-1 max-w-md text-xs text-slate-500">New leave, salary advance, payroll, and expense requests will appear here when submitted.</p></div>}
+      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Legacy Pending expenses and unsaved disciplinary letters are not approval requests. Security changes need persisted request records before they can enter this queue.</footer>
+    </section>
+
+    {selected && <ApprovalDialog item={selected} note={decisionNote} setNote={setDecisionNote} message={message} onClose={() => { setSelected(null); setMessage('') }} onDecision={decide} />}
+  </div>
+}
+
+function SummaryMetric({ title, value, icon, tone }: { title: string; value: number; icon: string; tone: string }) {
+  const Icon = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[icon] ?? Icons.CircleHelp
+  const color = tone === 'amber' ? 'bg-amber-50 text-amber-700' : tone === 'green' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+  return <article className="rounded-xl border border-slate-200 bg-white p-4"><span className={`grid size-9 place-items-center rounded-lg ${color}`}><Icon className="size-4" /></span><div className="mt-3 text-xl font-bold text-slate-900">{value}</div><div className="mt-0.5 text-xs font-semibold text-slate-700">{title}</div></article>
+}
+
+function ApprovalDialog({ item, note, setNote, message, onClose, onDecision }: { item: ApprovalItem; note: string; setNote: (value: string) => void; message: string; onClose: () => void; onDecision: (decision: 'Approved' | 'Rejected') => void }) {
+  const isPending = item.status === 'Awaiting review'
+  return <div className="fixed inset-0 z-80 grid place-items-center bg-slate-950/45 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-2xl"><header className="flex items-start justify-between border-b border-slate-100 px-5 py-4"><div><h2 id="approval-dialog-title" className="text-base font-bold text-slate-900">{isPending ? 'Review request' : 'Approval details'}</h2><p className="mt-1 text-xs text-slate-500">{item.source} · {item.reference} · Submitted by {item.requester}</p></div><button type="button" aria-label="Close approval details" onClick={onClose} className="grid size-8 place-items-center rounded-md text-slate-400 hover:bg-slate-100"><Icons.X className="size-4" /></button></header><div className="space-y-4 p-5"><div className="grid gap-4 sm:grid-cols-2"><Detail label="Source module" value={item.source} /><Detail label="Submitted" value={formatDate(item.submittedAt.slice(0, 10))} />{item.amount !== undefined && <Detail label="Amount" value={money(item.amount)} />}<Detail label="Request summary" value={item.summary} wide /></div><div className="rounded-lg bg-slate-50 p-4"><div className="text-[10px] font-semibold uppercase text-slate-400">Request details</div><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">{item.detail}</p></div>{isPending && <label className="block text-xs font-semibold text-slate-600">Decision note <span className="font-normal text-slate-400">(required for rejection)</span><textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary" placeholder="Add context for this decision" /></label>}{message && <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{message}</p>}{item.source === 'Payroll' && item.canApprove === false && <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">Payroll approval is blocked until each payslip is marked Ready in Payroll Management.</p>}<footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Close</button>{isPending && item.source !== 'Payroll' && <button type="button" onClick={() => onDecision('Rejected')} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700">Reject</button>}{isPending && <button type="button" disabled={item.canApprove === false} onClick={() => onDecision('Approved')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Approve</button>}</footer></div></section></div>
+}
+
+function Detail({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) { return <div className={wide ? 'sm:col-span-2' : ''}><div className="text-[10px] font-medium uppercase text-slate-400">{label}</div><div className="mt-1 text-xs font-semibold text-slate-800">{value}</div></div> }

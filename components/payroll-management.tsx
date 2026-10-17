@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import { createId, employeeDisplayName, exportCsv, formatDate, money, type Employee, type ErpState, type PayrollFrequency, type PayrollPayslipSnapshot, type PayrollRun, type PayrollRunStatus } from '@/lib/erp'
+import { approvePayrollRun } from '@/lib/approvals'
 
 type PayrollManagementProps = {
   state: ErpState
@@ -109,6 +110,7 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
       status: 'Draft',
       createdAt: now,
       updatedAt: now,
+      createdBy: 'Sarah Namirembe',
       payslips: employeesForFrequency.map((employee) => makePayslip(employee, state, frequency, period.periodStart, period.periodEnd)),
     }
     updateState({ ...state, payrollRuns: [run, ...state.payrollRuns] })
@@ -146,12 +148,17 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
     if (nextStatus === 'In review' && (selectedRun.status !== 'Draft' || needsReview > 0)) return
     if (nextStatus === 'Approved' && (selectedRun.status !== 'In review' || needsReview > 0)) return
     if (nextStatus === 'Paid' && selectedRun.status !== 'Approved') return
+    if (nextStatus === 'Approved') {
+      const approved = approvePayrollRun(selectedRun, 'Sarah Namirembe')
+      if (approved !== selectedRun) updateRun(selectedRun.id, () => approved)
+      return
+    }
     const now = new Date().toISOString()
     updateRun(selectedRun.id, (run) => ({
       ...run,
       status: nextStatus,
       updatedAt: now,
-      approvedAt: nextStatus === 'Approved' ? now : run.approvedAt,
+      approvedAt: run.approvedAt,
       paidAt: nextStatus === 'Paid' ? now : run.paidAt,
       payslips: nextStatus === 'Paid' ? run.payslips.map((slip) => ({ ...slip, paymentStatus: 'Paid' })) : run.payslips,
     }))

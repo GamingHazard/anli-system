@@ -62,6 +62,24 @@
   .receipt-total { font-size: 15px; }
   .receipt-thanks { margin-top: 28px; text-align: center; font-size: 11px; }
 }
+@media print {
+  body * { visibility: hidden !important; }
+  .disciplinary-print-root,
+  .disciplinary-print-root * { visibility: visible !important; }
+  .disciplinary-print-root {
+    position: fixed;
+    inset: 0;
+    display: block !important;
+    width: 100%;
+    min-height: 0;
+    max-width: none;
+    border: 0;
+    padding: 0;
+    box-shadow: none;
+    color: #111827;
+    background: #fff;
+  }
+}
 
 .login-shell { position: relative; min-height: 100vh; overflow: hidden; background: #0b1020; color: #f8fafc; isolation: isolate; }
 .login-shell::before { content: ''; position: absolute; inset: 0; z-index: -2; background: radial-gradient(circle at 14% 22%, rgba(109,40,217,.32), transparent 32%), radial-gradient(circle at 82% 78%, rgba(139,92,246,.18), transparent 34%), linear-gradient(135deg, #11182c 0%, #0b1020 54%, #0c0b18 100%); }

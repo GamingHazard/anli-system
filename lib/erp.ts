@@ -2,6 +2,18 @@ export type Status = 'Paid' | 'Pending' | 'Overdue' | 'Approved' | 'Draft' | 'Ac
 
 export type Sale = { id: string; date: string; customer: string; customerId?: string; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string }
 export type SalePayment = { id: string; saleId: string; amount: number; date: string; method: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Check'; txnID?: string; note?: string; recordedAt: string }
+export type InvoiceStatus = 'Draft' | 'Ready to submit' | 'Submitted' | 'Issued' | 'Failed' | 'Cancelled' | 'Credit note'
+export type InvoiceLine = { id: string; description: string; quantity: number; unitPrice: number; lineTotal: number; taxCategory?: string; taxRate?: number; taxAmount?: number }
+export type InvoicePartySnapshot = { name: string; tin?: string; email?: string; phone?: string; address?: string }
+export type InvoiceEvent = { id: string; type: string; at: string; actor: string; note?: string }
+export type Invoice = {
+  id: string; invoiceNumber: string; saleId: string; saleReference: string; status: InvoiceStatus
+  issueDate: string; dueDate?: string; currency: 'UGX'; paymentTerms: string
+  seller: InvoicePartySnapshot; buyer: InvoicePartySnapshot; lines: InvoiceLine[]
+  subtotal: number; taxTotal?: number; total: number
+  uraReference?: string; verificationUrl?: string; qrCodeData?: string
+  events: InvoiceEvent[]; createdAt: string; updatedAt: string
+}
 export type OrderStatus = 'Pending' | 'Confirmed' | 'In progress' | 'Ready' | 'Completed' | 'Cancelled'
 export type OrderItem = { id: string; product: string; quantity: number; unitPrice: number; lineTotal: number }
 export type OrderStatusChange = { status: OrderStatus; at: string }
@@ -88,6 +100,32 @@ export type AttendanceRecord = {
   note?: string
   updatedAt: string
 }
+export type LeaveType = 'Sick' | 'Maternity/Paternity' | 'Compassionate' | 'Other'
+export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
+export type LeaveDecision = { id: string; decision: 'Approved' | 'Rejected' | 'Cancelled'; actor: string; at: string; note?: string }
+export type LeaveRequest = {
+  id: string
+  reference: string
+  employeeId: string
+  employeeName: string
+  employeeNumber: string
+  department: string
+  role: string
+  employeeContact: string
+  leaveType: LeaveType
+  otherLeaveType?: string
+  reason: string
+  startDate: string
+  endDate: string
+  requestedDays: number
+  handoverEmployeeId: string
+  handoverName: string
+  handoverContact: string
+  status: LeaveStatus
+  requestedAt: string
+  updatedAt: string
+  decisions: LeaveDecision[]
+}
 export type PayrollFrequency = 'Monthly' | 'Weekly'
 export type PayrollRunStatus = 'Draft' | 'In review' | 'Approved' | 'Paid'
 export type PayrollReviewStatus = 'Needs review' | 'Ready'
@@ -122,7 +160,10 @@ export type PayrollRun = {
   status: PayrollRunStatus
   createdAt: string
   updatedAt: string
+  createdBy?: string
   approvedAt?: string
+  approvedBy?: string
+  approvalNote?: string
   paidAt?: string
   notes?: string
   payslips: PayrollPayslipSnapshot[]
@@ -164,7 +205,10 @@ export type SalaryAdvance = {
   createdAt: string
   updatedAt: string
 }
-export type Expense = { id: string; reference: string; category: string; description: string; amount: number; date: string; status: 'Paid' | 'Pending'; department: string }
+export type ExpenseAttachment = { id: string; name: string; dataUrl: string; mediaType: string; sizeBytes: number }
+export type ExpenseStatus = 'Pending approval' | 'Approved' | 'Rejected' | 'Paid' | 'Pending'
+export type ExpenseDecision = { id: string; decision: 'Approved' | 'Rejected'; actor: string; at: string; note?: string }
+export type Expense = { id: string; reference: string; category: string; description: string; amount: number; date: string; status: ExpenseStatus; department: string; expenseType?: 'Supplier bill' | 'Employee reimbursement' | 'Petty cash / other'; payee?: string; attachments?: ExpenseAttachment[]; requestedBy?: string; createdAt?: string; decisions?: ExpenseDecision[]; rejectionReason?: string }
 export type Customer = {
   id: string
   name: string
@@ -184,12 +228,100 @@ export type Customer = {
   purchases: number
 }
 export type RawMaterial = { id: string; code: string; name: string; category: string; quantity: number; unit: string; threshold: number; cost: number; location: string }
+export type RecipeIngredient = { materialId: string; quantityPerTank: number }
+export type ProductionRecipe = { id: string; productName: string; tankUnit: string; ingredients: RecipeIngredient[]; createdAt: string; updatedAt: string }
+export type ProductionRunLine = { materialId: string; materialName: string; quantityPerTank: number; totalQuantity: number; unit: string }
+export type ProductionRun = { id: string; reference: string; recipeId: string; productId?: string; productName: string; productUnit?: string; productionDate: string; tankCount: number; producedQuantity?: number; openingStock?: number; salesQuantity?: number; damagedQuantity?: number; closingStock?: number; damageReason?: string; salesSource: 'Manual'; location: string; lines: ProductionRunLine[]; recordedAt: string; actor: string }
+export type FinishedProduct = { id: string; code: string; name: string; category: string; unit: string; flavour?: 'Mango' | 'Pineapple milk'; recipeId?: string; recipeRequired: boolean; active: boolean; createdAt: string; updatedAt: string }
+export type FinishedStockMovementType = 'Opening balance' | 'Production' | 'Sales dispatch' | 'Damage/write-off' | 'Internal use/sample' | 'Transfer in' | 'Transfer out' | 'Other stock in' | 'Adjustment increase' | 'Adjustment decrease'
+export type FinishedStockMovement = { id: string; reference: string; productId: string; type: FinishedStockMovementType; quantity: number; date: string; recordedAt: string; reason?: string; note?: string; actor: string }
+export type AssetCategory = 'Office assets' | 'Vehicles' | 'Production assets' | 'Store' | 'Machinery' | 'Others'
+export type AssetCondition = 'Good' | 'Fair' | 'Needs repair' | 'Unserviceable'
+export type AssetStatus = 'Active' | 'Under maintenance' | 'Disposed'
+export type CompanyAsset = {
+  id: string; assetTag: string; name: string; category: AssetCategory; assetType?: string
+  makeModel?: string; serialNumber?: string; registration?: string; vin?: string; mileage?: number
+  capacity?: string; productionLine?: string; serviceInterval?: string
+  acquisitionDate?: string; acquisitionCost?: number; supplier?: string; warrantyEnd?: string
+  location: string; assignee?: string; department?: string; condition: AssetCondition; status: AssetStatus
+  conditionNotes?: string; nextInspectionDate?: string; nextServiceDate?: string; insuranceDueDate?: string
+  notes?: string; createdAt: string; updatedAt: string
+}
+export type AssetEventType = 'Acquired' | 'Inspection' | 'Transfer' | 'Assignment' | 'Maintenance' | 'Status change' | 'Disposed'
+export type AssetEvent = {
+  id: string; assetId: string; type: AssetEventType; date: string; recordedAt: string; actor: string
+  reference?: string; fromLocation?: string; toLocation?: string; fromAssignee?: string; toAssignee?: string
+  previousCondition?: AssetCondition; newCondition?: AssetCondition; previousStatus?: AssetStatus; newStatus?: AssetStatus
+  reason?: string; note?: string; provider?: string; cost?: number; nextInspectionDate?: string; nextServiceDate?: string
+}
+export type StockMovementType = 'Opening balance' | 'Stock in' | 'Stock out' | 'Production use' | 'Transfer' | 'Adjustment increase' | 'Adjustment decrease'
+export type StockMovement = { id: string; reference: string; receiptReference?: string; productionRunId?: string; materialId: string; type: StockMovementType; quantity: number; unit: string; date: string; recordedAt: string; fromLocation?: string; toLocation?: string; supplier?: string; sourceReference?: string; unitCost?: number; reason?: string; actor: string }
 export type Activity = { id: string; action: string; module: string; actor: string; time: string; outcome: 'Success' | 'Review' }
-export type ErpState = { sales: Sale[]; payments: SalePayment[]; orders: Order[]; employees: Employee[]; employeeDrafts: EmployeeDraft[]; attendanceRecords: AttendanceRecord[]; payrollRuns: PayrollRun[]; salaryAdvances: SalaryAdvance[]; expenses: Expense[]; customers: Customer[]; materials: RawMaterial[]; activities: Activity[] }
+export type CompanyProfile = {
+  legalName: string; tradingName: string; email: string; phone: string; website: string
+  addressLine1: string; addressLine2: string; city: string; region: string; postalCode: string; country: string
+  tin: string; registrationNumber: string; registrationAuthority: string
+}
+export type ErpState = { sales: Sale[]; invoices: Invoice[]; payments: SalePayment[]; orders: Order[]; employees: Employee[]; employeeDrafts: EmployeeDraft[]; attendanceRecords: AttendanceRecord[]; leaveRequests: LeaveRequest[]; payrollRuns: PayrollRun[]; salaryAdvances: SalaryAdvance[]; expenses: Expense[]; customers: Customer[]; materials: RawMaterial[]; stockMovements: StockMovement[]; productionRecipes: ProductionRecipe[]; productionRuns: ProductionRun[]; finishedProducts: FinishedProduct[]; finishedStockMovements: FinishedStockMovement[]; assets: CompanyAsset[]; assetEvents: AssetEvent[]; companyProfile: CompanyProfile; activities: Activity[] }
+
+export const emptyCompanyProfile: CompanyProfile = {
+  legalName: '', tradingName: '', email: '', phone: '', website: '', addressLine1: '', addressLine2: '',
+  city: '', region: '', postalCode: '', country: '', tin: '', registrationNumber: '', registrationAuthority: '',
+}
+
+const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
+  const profile = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return Object.fromEntries(Object.keys(emptyCompanyProfile).map((key) => [
+    key,
+    typeof profile[key] === 'string' ? profile[key] : '',
+  ])) as unknown as CompanyProfile
+}
+
+export const createInvoiceDraft = (sale: Sale, customer: Customer | undefined, profile: CompanyProfile): Invoice => {
+  const now = new Date().toISOString()
+  const quantity = Math.max(1, Number(sale.quantity) || 1)
+  const unitPrice = sale.total / quantity
+  const sellerName = profile.legalName || profile.tradingName || ''
+  const address = [profile.addressLine1, profile.addressLine2, profile.city, profile.region, profile.country].filter(Boolean).join(', ')
+  const buyerAddress = [customer?.district, customer?.region, customer?.country].filter(Boolean).join(', ')
+  return {
+    id: `INV-${sale.id}`,
+    invoiceNumber: `INV-${sale.id}`,
+    saleId: sale.id,
+    saleReference: sale.reference,
+    status: 'Draft',
+    issueDate: sale.date,
+    dueDate: sale.dueDate,
+    currency: 'UGX',
+    paymentTerms: sale.paymentTerms || 'Same-day',
+    seller: { name: sellerName, tin: profile.tin || undefined, email: profile.email || undefined, phone: profile.phone || undefined, address: address || undefined },
+    buyer: { name: sale.customer, tin: customer?.tin || undefined, email: customer?.email || undefined, phone: customer?.phone || undefined, address: buyerAddress || undefined },
+    lines: [{ id: `${sale.id}-LINE-1`, description: sale.product, quantity, unitPrice, lineTotal: sale.total }],
+    subtotal: sale.total,
+    total: sale.total,
+    events: [{ id: `${sale.id}-INVOICE-DRAFT`, type: 'Draft created', at: now, actor: 'System', note: 'Automatic invoice draft created from sale.' }],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
 const daysFromNow = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10)
+const seedMaterials: RawMaterial[] = [
+  { id: 'RM-001', code: 'RM-MZ-01', name: 'Maize grain', category: 'Grains', quantity: 2840, unit: 'kg', threshold: 1000, cost: 1250, location: 'Main Warehouse' },
+  { id: 'RM-002', code: 'RM-PK-02', name: 'Packaging bags', category: 'Packaging', quantity: 620, unit: 'pcs', threshold: 800, cost: 420, location: 'Packaging Store' },
+  { id: 'RM-003', code: 'RM-WH-03', name: 'Wheat grain', category: 'Grains', quantity: 1640, unit: 'kg', threshold: 900, cost: 1850, location: 'Main Warehouse' },
+  { id: 'RM-004', code: 'RM-SG-04', name: 'Sugar', category: 'Ingredients', quantity: 410, unit: 'kg', threshold: 500, cost: 2900, location: 'Ingredients Store' },
+]
+const seedOpeningMovements: StockMovement[] = seedMaterials.map((material) => ({
+  id: `OPEN-${material.id}`, reference: `OPEN-${material.code}`, materialId: material.id,
+  type: 'Opening balance', quantity: material.quantity, unit: material.unit, date: daysAgo(0),
+  recordedAt: `${daysAgo(0)}T09:00:00.000Z`, toLocation: material.location,
+  unitCost: material.cost, reason: 'Opening stock from initial inventory', actor: 'System',
+}))
 export const seedState: ErpState = {
+  companyProfile: { ...emptyCompanyProfile },
+  invoices: [],
   orders: [
     { id: 'ORD-1008', reference: 'ORD-1008', date: daysAgo(0), createdAt: `${daysAgo(0)}T09:00:00.000Z`, customer: 'Nile Foods Ltd', items: [{ id: 'ORD-1008-1', product: 'Wheat Flour 25kg', quantity: 36, unitPrice: 80000, lineTotal: 2880000 }], total: 2880000, requestedDate: daysAgo(0), fulfilmentMethod: 'Delivery', destination: 'Next wholesale run', paymentTerms: 'Credit', status: 'Pending', statusHistory: [{ status: 'Pending', at: `${daysAgo(0)}T09:00:00.000Z` }], priority: 'High', priorityReason: 'Customer requested urgent dispatch.', notes: 'Deliver with the next wholesale run.' },
     { id: 'ORD-1007', reference: 'ORD-1007', date: daysAgo(2), createdAt: `${daysAgo(2)}T09:00:00.000Z`, customer: 'Kampala Fresh Mart', items: [{ id: 'ORD-1007-1', product: 'Premium Maize Flour', quantity: 60, unitPrice: 45000, lineTotal: 2700000 }], total: 2700000, requestedDate: daysAgo(2), fulfilmentMethod: 'Delivery', destination: 'Customer requested delivery before Friday.', paymentTerms: 'Same-day', status: 'Confirmed', statusHistory: [{ status: 'Confirmed', at: `${daysAgo(2)}T09:00:00.000Z` }], priority: 'Normal', notes: 'Customer requested delivery before Friday.' },
@@ -216,6 +348,7 @@ export const seedState: ErpState = {
   ],
   employeeDrafts: [],
   attendanceRecords: [],
+  leaveRequests: [],
   payrollRuns: [],
   salaryAdvances: [],
   expenses: [
@@ -230,12 +363,14 @@ export const seedState: ErpState = {
     { id: 'C-003', name: 'Acacia Hotels', type: 'Corporate', phone: '+256 783 112 400', email: 'finance@acacia.ug', status: 'Active', purchases: 7 },
     { id: 'C-004', name: 'Green Basket', type: 'Retail', phone: '+256 709 445 201', email: 'hello@greenbasket.ug', status: 'Inactive', purchases: 4 },
   ],
-  materials: [
-    { id: 'RM-001', code: 'RM-MZ-01', name: 'Maize grain', category: 'Grains', quantity: 2840, unit: 'kg', threshold: 1000, cost: 1250, location: 'Main Warehouse' },
-    { id: 'RM-002', code: 'RM-PK-02', name: 'Packaging bags', category: 'Packaging', quantity: 620, unit: 'pcs', threshold: 800, cost: 420, location: 'Packaging Store' },
-    { id: 'RM-003', code: 'RM-WH-03', name: 'Wheat grain', category: 'Grains', quantity: 1640, unit: 'kg', threshold: 900, cost: 1850, location: 'Main Warehouse' },
-    { id: 'RM-004', code: 'RM-SG-04', name: 'Sugar', category: 'Ingredients', quantity: 410, unit: 'kg', threshold: 500, cost: 2900, location: 'Ingredients Store' },
-  ],
+  materials: seedMaterials,
+  stockMovements: seedOpeningMovements,
+  productionRecipes: [],
+  productionRuns: [],
+  finishedProducts: [],
+  finishedStockMovements: [],
+  assets: [],
+  assetEvents: [],
   activities: [
     { id: 'A-01', action: 'Sale recorded', module: 'Sales', actor: 'Sarah Namirembe', time: '12 min ago', outcome: 'Success' },
     { id: 'A-02', action: 'Invoice INV-0091 issued', module: 'Invoicing', actor: 'David Okello', time: '38 min ago', outcome: 'Success' },
@@ -244,7 +379,12 @@ export const seedState: ErpState = {
   ],
 }
 
-export const cloneSeed = (): ErpState => JSON.parse(JSON.stringify(seedState))
+export const cloneSeed = (): ErpState => {
+  const state = JSON.parse(JSON.stringify(seedState)) as ErpState
+  state.invoices = state.sales.map((sale) => createInvoiceDraft(sale, state.customers.find((customer) => customer.id === sale.customerId)
+    ?? state.customers.find((customer) => customer.name.trim().toLowerCase() === sale.customer.trim().toLowerCase()), state.companyProfile))
+  return state
+}
 export const money = (value: number) => new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX', maximumFractionDigits: 0 }).format(value)
 export const formatDate = (date: string) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(date))
 export const sum = (items: number[]) => items.reduce((total, value) => total + value, 0)
@@ -261,6 +401,282 @@ export const paymentStateForSale = (sale: Sale, payments: SalePayment[], today =
 export const isWithinDays = (date: string, days: number) => (Date.now() - new Date(date).getTime()) / 86400000 <= days
 export const simulate = <T,>(value: T, delay = 260) => new Promise<T>((resolve) => setTimeout(() => resolve(value), delay))
 const STORAGE_KEY = 'lumina-erp-demo-v1'
+const stockMovementTypes: StockMovementType[] = ['Opening balance', 'Stock in', 'Stock out', 'Production use', 'Transfer', 'Adjustment increase', 'Adjustment decrease']
+
+const normalizeStockMovements = (value: unknown): StockMovement[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((movement, index) => ({
+      id: String(movement.id || `MOV-${index + 1}`),
+      reference: String(movement.reference || `MOV-${String(index + 1).padStart(5, '0')}`),
+      receiptReference: typeof movement.receiptReference === 'string' ? movement.receiptReference : undefined,
+      productionRunId: typeof movement.productionRunId === 'string' ? movement.productionRunId : undefined,
+      materialId: String(movement.materialId || ''),
+      type: stockMovementTypes.includes(String(movement.type) as StockMovementType) ? movement.type as StockMovementType : 'Adjustment increase',
+      quantity: Math.max(0, Number(movement.quantity) || 0),
+      unit: String(movement.unit || ''),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(movement.date || '')) ? String(movement.date) : new Date().toISOString().slice(0, 10),
+      recordedAt: typeof movement.recordedAt === 'string' ? movement.recordedAt : new Date().toISOString(),
+      fromLocation: typeof movement.fromLocation === 'string' ? movement.fromLocation : undefined,
+      toLocation: typeof movement.toLocation === 'string' ? movement.toLocation : undefined,
+      supplier: typeof movement.supplier === 'string' ? movement.supplier : undefined,
+      sourceReference: typeof movement.sourceReference === 'string' ? movement.sourceReference : undefined,
+      unitCost: Number.isFinite(Number(movement.unitCost)) && Number(movement.unitCost) >= 0 ? Number(movement.unitCost) : undefined,
+      reason: typeof movement.reason === 'string' ? movement.reason : undefined,
+      actor: String(movement.actor || 'Administrator'),
+    }))
+    .filter((movement) => movement.materialId && movement.quantity > 0 && movement.unit)
+}
+
+const normalizeProductionRecipes = (value: unknown): ProductionRecipe[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((recipe, index) => {
+      const ingredients: RecipeIngredient[] = Array.isArray(recipe.ingredients)
+        ? recipe.ingredients.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+          .map((item) => ({ materialId: String(item.materialId || ''), quantityPerTank: Number(item.quantityPerTank) }))
+          .filter((item) => item.materialId && Number.isFinite(item.quantityPerTank) && item.quantityPerTank > 0)
+        : []
+      const createdAt = typeof recipe.createdAt === 'string' ? recipe.createdAt : new Date().toISOString()
+      return {
+        id: String(recipe.id || `RECIPE-${index + 1}`),
+        productName: String(recipe.productName || ''),
+        tankUnit: String(recipe.tankUnit || 'tank'),
+        ingredients,
+        createdAt,
+        updatedAt: typeof recipe.updatedAt === 'string' ? recipe.updatedAt : createdAt,
+      }
+    })
+    .filter((recipe) => recipe.productName && recipe.ingredients.length > 0)
+}
+
+const normalizeProductionRuns = (value: unknown): ProductionRun[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((run, index) => {
+      const lines: ProductionRunLine[] = Array.isArray(run.lines)
+        ? run.lines.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+          .map((item) => ({
+            materialId: String(item.materialId || ''),
+            materialName: String(item.materialName || ''),
+            quantityPerTank: Math.max(0, Number(item.quantityPerTank) || 0),
+            totalQuantity: Math.max(0, Number(item.totalQuantity) || 0),
+            unit: String(item.unit || ''),
+          })).filter((item) => item.materialId && item.totalQuantity > 0 && item.unit)
+        : []
+      const productionDate = String(run.productionDate || '')
+      const recordedAt = typeof run.recordedAt === 'string' ? run.recordedAt : new Date().toISOString()
+      return {
+        id: String(run.id || `PROD-${index + 1}`),
+        reference: String(run.reference || `PROD-${String(index + 1).padStart(5, '0')}`),
+        recipeId: String(run.recipeId || ''),
+        productId: typeof run.productId === 'string' ? run.productId : undefined,
+        productName: String(run.productName || ''),
+        productUnit: String(run.productUnit || 'unit'),
+        productionDate,
+        tankCount: Math.max(0, Number(run.tankCount) || 0),
+        producedQuantity: Number.isFinite(Number(run.producedQuantity)) ? Math.max(0, Number(run.producedQuantity)) : Math.max(0, Number(run.tankCount) || 0),
+        openingStock: Number.isFinite(Number(run.openingStock)) ? Math.max(0, Number(run.openingStock)) : undefined,
+        salesQuantity: Number.isFinite(Number(run.salesQuantity)) ? Math.max(0, Number(run.salesQuantity)) : undefined,
+        damagedQuantity: Number.isFinite(Number(run.damagedQuantity)) ? Math.max(0, Number(run.damagedQuantity)) : undefined,
+        closingStock: Number.isFinite(Number(run.closingStock)) ? Math.max(0, Number(run.closingStock)) : undefined,
+        damageReason: typeof run.damageReason === 'string' ? run.damageReason : undefined,
+        salesSource: 'Manual' as const,
+        location: String(run.location || ''),
+        lines,
+        recordedAt,
+        actor: String(run.actor || 'Administrator'),
+      }
+    })
+    .filter((run) => run.productName && /^\d{4}-\d{2}-\d{2}$/.test(run.productionDate) && run.tankCount > 0 && run.lines.length > 0)
+}
+
+const finishedMovementTypes: FinishedStockMovementType[] = ['Opening balance', 'Production', 'Sales dispatch', 'Damage/write-off', 'Internal use/sample', 'Transfer in', 'Transfer out', 'Other stock in', 'Adjustment increase', 'Adjustment decrease']
+
+const normalizeFinishedProducts = (value: unknown): FinishedProduct[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((product, index) => {
+      const createdAt = typeof product.createdAt === 'string' ? product.createdAt : new Date().toISOString()
+      return {
+        id: String(product.id || `FP-${index + 1}`),
+        code: String(product.code || `PRODUCT-${String(index + 1).padStart(3, '0')}`),
+        name: String(product.name || ''),
+        category: String(product.category || 'Finished goods'),
+        unit: String(product.unit || 'unit'),
+        flavour: product.flavour === 'Mango' ? 'Mango' as const : product.flavour === 'Pineapple milk' ? 'Pineapple milk' as const : undefined,
+        recipeId: typeof product.recipeId === 'string' ? product.recipeId : undefined,
+        recipeRequired: Boolean(product.recipeRequired),
+        active: product.active !== false,
+        createdAt,
+        updatedAt: typeof product.updatedAt === 'string' ? product.updatedAt : createdAt,
+      }
+    }).filter((product) => product.name)
+}
+
+const normalizeFinishedStockMovements = (value: unknown): FinishedStockMovement[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((movement, index) => ({
+      id: String(movement.id || `FG-MOV-${index + 1}`),
+      reference: String(movement.reference || `FG-${String(index + 1).padStart(5, '0')}`),
+      productId: String(movement.productId || ''),
+      type: finishedMovementTypes.includes(String(movement.type) as FinishedStockMovementType) ? movement.type as FinishedStockMovementType : 'Adjustment increase',
+      quantity: Math.max(0, Number(movement.quantity) || 0),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(movement.date || '')) ? String(movement.date) : new Date().toISOString().slice(0, 10),
+      recordedAt: typeof movement.recordedAt === 'string' ? movement.recordedAt : new Date().toISOString(),
+      reason: typeof movement.reason === 'string' ? movement.reason : undefined,
+      note: typeof movement.note === 'string' ? movement.note : undefined,
+      actor: String(movement.actor || 'Administrator'),
+    })).filter((movement) => movement.productId && movement.quantity > 0)
+}
+
+const assetCategories: AssetCategory[] = ['Office assets', 'Vehicles', 'Production assets', 'Store', 'Machinery', 'Others']
+const assetConditions: AssetCondition[] = ['Good', 'Fair', 'Needs repair', 'Unserviceable']
+const assetStatuses: AssetStatus[] = ['Active', 'Under maintenance', 'Disposed']
+const assetEventTypes: AssetEventType[] = ['Acquired', 'Inspection', 'Transfer', 'Assignment', 'Maintenance', 'Status change', 'Disposed']
+const optionalDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined
+
+const normalizeAssets = (value: unknown): CompanyAsset[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((asset, index) => {
+      const createdAt = typeof asset.createdAt === 'string' ? asset.createdAt : new Date().toISOString()
+      return {
+        id: String(asset.id || `ASSET-${index + 1}`),
+        assetTag: String(asset.assetTag || `ASSET-${String(index + 1).padStart(4, '0')}`),
+        name: String(asset.name || ''),
+        category: assetCategories.includes(String(asset.category) as AssetCategory) ? asset.category as AssetCategory : 'Others',
+        assetType: typeof asset.assetType === 'string' ? asset.assetType : undefined,
+        makeModel: typeof asset.makeModel === 'string' ? asset.makeModel : undefined,
+        serialNumber: typeof asset.serialNumber === 'string' ? asset.serialNumber : undefined,
+        registration: typeof asset.registration === 'string' ? asset.registration : undefined,
+        vin: typeof asset.vin === 'string' ? asset.vin : undefined,
+        mileage: Number.isFinite(Number(asset.mileage)) && asset.mileage !== '' ? Math.max(0, Number(asset.mileage)) : undefined,
+        capacity: typeof asset.capacity === 'string' ? asset.capacity : undefined,
+        productionLine: typeof asset.productionLine === 'string' ? asset.productionLine : undefined,
+        serviceInterval: typeof asset.serviceInterval === 'string' ? asset.serviceInterval : undefined,
+        acquisitionDate: optionalDate(asset.acquisitionDate),
+        acquisitionCost: Number.isFinite(Number(asset.acquisitionCost)) && asset.acquisitionCost !== '' ? Math.max(0, Number(asset.acquisitionCost)) : undefined,
+        supplier: typeof asset.supplier === 'string' ? asset.supplier : undefined,
+        warrantyEnd: optionalDate(asset.warrantyEnd),
+        location: String(asset.location || 'Unassigned'),
+        assignee: typeof asset.assignee === 'string' ? asset.assignee : undefined,
+        department: typeof asset.department === 'string' ? asset.department : undefined,
+        condition: assetConditions.includes(String(asset.condition) as AssetCondition) ? asset.condition as AssetCondition : 'Good',
+        status: assetStatuses.includes(String(asset.status) as AssetStatus) ? asset.status as AssetStatus : 'Active',
+        conditionNotes: typeof asset.conditionNotes === 'string' ? asset.conditionNotes : undefined,
+        nextInspectionDate: optionalDate(asset.nextInspectionDate),
+        nextServiceDate: optionalDate(asset.nextServiceDate),
+        insuranceDueDate: optionalDate(asset.insuranceDueDate),
+        notes: typeof asset.notes === 'string' ? asset.notes : undefined,
+        createdAt,
+        updatedAt: typeof asset.updatedAt === 'string' ? asset.updatedAt : createdAt,
+      }
+    }).filter((asset) => asset.name)
+}
+
+const normalizeAssetEvents = (value: unknown): AssetEvent[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((event, index) => ({
+      id: String(event.id || `AEVT-${index + 1}`),
+      assetId: String(event.assetId || ''),
+      type: assetEventTypes.includes(String(event.type) as AssetEventType) ? event.type as AssetEventType : 'Inspection',
+      date: optionalDate(event.date) || new Date().toISOString().slice(0, 10),
+      recordedAt: typeof event.recordedAt === 'string' ? event.recordedAt : new Date().toISOString(),
+      actor: String(event.actor || 'Administrator'),
+      reference: typeof event.reference === 'string' ? event.reference : undefined,
+      fromLocation: typeof event.fromLocation === 'string' ? event.fromLocation : undefined,
+      toLocation: typeof event.toLocation === 'string' ? event.toLocation : undefined,
+      fromAssignee: typeof event.fromAssignee === 'string' ? event.fromAssignee : undefined,
+      toAssignee: typeof event.toAssignee === 'string' ? event.toAssignee : undefined,
+      previousCondition: assetConditions.includes(String(event.previousCondition) as AssetCondition) ? event.previousCondition as AssetCondition : undefined,
+      newCondition: assetConditions.includes(String(event.newCondition) as AssetCondition) ? event.newCondition as AssetCondition : undefined,
+      previousStatus: assetStatuses.includes(String(event.previousStatus) as AssetStatus) ? event.previousStatus as AssetStatus : undefined,
+      newStatus: assetStatuses.includes(String(event.newStatus) as AssetStatus) ? event.newStatus as AssetStatus : undefined,
+      reason: typeof event.reason === 'string' ? event.reason : undefined,
+      note: typeof event.note === 'string' ? event.note : undefined,
+      provider: typeof event.provider === 'string' ? event.provider : undefined,
+      cost: Number.isFinite(Number(event.cost)) && event.cost !== '' ? Math.max(0, Number(event.cost)) : undefined,
+      nextInspectionDate: optionalDate(event.nextInspectionDate),
+      nextServiceDate: optionalDate(event.nextServiceDate),
+    })).filter((event) => event.assetId)
+}
+
+const migrateFinishedProducts = (recipes: ProductionRecipe[], runs: ProductionRun[]): FinishedProduct[] => {
+  const names = new Map<string, { recipeId?: string; unit: string }>()
+  recipes.forEach((recipe) => names.set(recipe.productName.trim().toLowerCase(), { recipeId: recipe.id, unit: recipe.tankUnit || 'unit' }))
+  runs.forEach((run) => {
+    const key = run.productName.trim().toLowerCase()
+    if (!names.has(key)) names.set(key, { recipeId: run.recipeId || undefined, unit: run.productUnit || 'unit' })
+  })
+  const createdAt = new Date().toISOString()
+  return [...names.entries()].map(([key, value], index) => {
+    const name = recipes.find((recipe) => recipe.productName.trim().toLowerCase() === key)?.productName
+      ?? runs.find((run) => run.productName.trim().toLowerCase() === key)?.productName
+      ?? key
+    return { id: `FG-MIG-${index + 1}`, code: `LEGACY-${String(index + 1).padStart(3, '0')}`, name, category: 'Finished goods', unit: value.unit, recipeId: value.recipeId, recipeRequired: false, active: true, createdAt, updatedAt: createdAt }
+  })
+}
+
+const migrateFinishedMovements = (products: FinishedProduct[], runs: ProductionRun[]): FinishedStockMovement[] => {
+  const productByName = new Map(products.map((product) => [product.name.trim().toLowerCase(), product]))
+  const earliestRun = new Map<string, ProductionRun>()
+  runs.forEach((run) => {
+    const key = run.productName.trim().toLowerCase()
+    const current = earliestRun.get(key)
+    if (!current || run.productionDate < current.productionDate) earliestRun.set(key, run)
+  })
+  return runs.flatMap((run) => {
+    const product = productByName.get(run.productName.trim().toLowerCase())
+    if (!product) return []
+    const opening: FinishedStockMovement[] = []
+    if (run.openingStock !== undefined && earliestRun.get(run.productName.trim().toLowerCase())?.id === run.id && run.openingStock > 0) {
+      opening.push({ id: `FG-OPEN-${run.id}`, reference: `OPEN-${run.reference}`, productId: product.id, type: 'Opening balance', quantity: run.openingStock, date: run.productionDate, recordedAt: run.recordedAt, reason: 'Opening balance migrated from daily production history', actor: 'System' })
+    }
+    const runQuantity = run.producedQuantity ?? run.tankCount
+    return [
+      ...opening,
+      ...(runQuantity > 0 ? [{ id: `FG-PROD-${run.id}`, reference: run.reference, productId: product.id, type: 'Production' as const, quantity: runQuantity, date: run.productionDate, recordedAt: run.recordedAt, reason: 'Migrated production output', actor: run.actor }] : []),
+      ...((run.salesQuantity ?? 0) > 0 ? [{ id: `FG-SALES-${run.id}`, reference: run.reference, productId: product.id, type: 'Sales dispatch' as const, quantity: run.salesQuantity!, date: run.productionDate, recordedAt: run.recordedAt, reason: 'Migrated daily sales quantity', actor: run.actor }] : []),
+      ...((run.damagedQuantity ?? 0) > 0 ? [{ id: `FG-DAMAGE-${run.id}`, reference: run.reference, productId: product.id, type: 'Damage/write-off' as const, quantity: run.damagedQuantity!, date: run.productionDate, recordedAt: run.recordedAt, reason: run.damageReason || 'Migrated daily damage quantity', actor: run.actor }] : []),
+    ]
+  })
+}
+
+const openingMovementsFor = (materials: RawMaterial[]): StockMovement[] => materials
+  .filter((material) => material.quantity > 0)
+  .map((material) => ({
+    id: `OPEN-${material.id}`, reference: `OPEN-${material.code}`, materialId: material.id,
+    type: 'Opening balance', quantity: material.quantity, unit: material.unit,
+    date: new Date().toISOString().slice(0, 10), recordedAt: new Date().toISOString(),
+    toLocation: material.location || 'Main Warehouse', unitCost: material.cost,
+    reason: 'Opening stock migrated from existing inventory balance', actor: 'System',
+  }))
+
+export const stockQuantityAtLocation = (materialId: string, movements: StockMovement[], location?: string) => movements
+  .filter((movement) => movement.materialId === materialId)
+  .reduce((quantity, movement) => {
+    const sourceMatch = !location || movement.fromLocation === location
+    const destinationMatch = !location || movement.toLocation === location
+    if (['Opening balance', 'Stock in', 'Adjustment increase'].includes(movement.type) && destinationMatch) return quantity + movement.quantity
+    if (['Stock out', 'Production use', 'Adjustment decrease'].includes(movement.type) && sourceMatch) return quantity - movement.quantity
+    if (movement.type === 'Transfer') return quantity + (destinationMatch ? movement.quantity : 0) - (sourceMatch ? movement.quantity : 0)
+    return quantity
+  }, 0)
+
+export const stockUnitCost = (material: RawMaterial, movements: StockMovement[]) => {
+  const receipts = movements.filter((movement) => movement.materialId === material.id && ['Opening balance', 'Stock in'].includes(movement.type) && movement.unitCost !== undefined)
+  const receiptQuantity = receipts.reduce((total, movement) => total + movement.quantity, 0)
+  const receiptValue = receipts.reduce((total, movement) => total + movement.quantity * (movement.unitCost ?? 0), 0)
+  return receiptQuantity > 0 ? receiptValue / receiptQuantity : material.cost
+}
+
+export const stockValue = (materials: RawMaterial[], movements: StockMovement[]) => materials.reduce((total, material) => {
+  return total + Math.max(0, stockQuantityAtLocation(material.id, movements)) * stockUnitCost(material, movements)
+}, 0)
+
 const normalizeOrder = (value: unknown, index: number): Order => {
   const legacy = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   const reference = String(legacy.reference || legacy.id || `ORD-${index + 1}`)
@@ -347,6 +763,77 @@ const linkCustomerTransactions = (state: ErpState): ErpState => ({
   })),
 })
 
+const invoiceStatuses: InvoiceStatus[] = ['Draft', 'Ready to submit', 'Submitted', 'Issued', 'Failed', 'Cancelled', 'Credit note']
+const normalizeInvoiceParty = (value: unknown, fallback: InvoicePartySnapshot): InvoicePartySnapshot => {
+  const party = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    name: typeof party.name === 'string' ? party.name : fallback.name,
+    tin: typeof party.tin === 'string' ? party.tin : fallback.tin,
+    email: typeof party.email === 'string' ? party.email : fallback.email,
+    phone: typeof party.phone === 'string' ? party.phone : fallback.phone,
+    address: typeof party.address === 'string' ? party.address : fallback.address,
+  }
+}
+
+const normalizeInvoices = (value: unknown, sales: Sale[], customers: Customer[], profile: CompanyProfile): Invoice[] => {
+  const salesById = new Map(sales.map((sale) => [sale.id, sale]))
+  const seenSaleIds = new Set<string>()
+  const saved = Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')).flatMap((item) => {
+    const saleId = typeof item.saleId === 'string' ? item.saleId : ''
+    const sale = salesById.get(saleId)
+    if (!sale || seenSaleIds.has(saleId)) return []
+    seenSaleIds.add(saleId)
+    const customer = customers.find((entry) => entry.id === sale.customerId)
+      ?? customers.find((entry) => entry.name.trim().toLowerCase() === sale.customer.trim().toLowerCase())
+    const fallback = createInvoiceDraft(sale, customer, profile)
+    const status = invoiceStatuses.includes(String(item.status) as InvoiceStatus) ? item.status as InvoiceStatus : 'Draft'
+    const lines = Array.isArray(item.lines) ? item.lines.filter((line): line is Record<string, unknown> => Boolean(line && typeof line === 'object')).map((line, index) => ({
+      id: String(line.id || `${sale.id}-LINE-${index + 1}`),
+      description: String(line.description || sale.product),
+      quantity: Math.max(0, Number(line.quantity) || 0),
+      unitPrice: Math.max(0, Number(line.unitPrice) || 0),
+      lineTotal: Math.max(0, Number(line.lineTotal) || 0),
+      taxCategory: typeof line.taxCategory === 'string' ? line.taxCategory : undefined,
+      taxRate: Number.isFinite(Number(line.taxRate)) && line.taxRate !== '' ? Number(line.taxRate) : undefined,
+      taxAmount: Number.isFinite(Number(line.taxAmount)) && line.taxAmount !== '' ? Number(line.taxAmount) : undefined,
+    })) : fallback.lines
+    const events = Array.isArray(item.events) ? item.events.filter((event): event is Record<string, unknown> => Boolean(event && typeof event === 'object')).map((event, index) => ({
+      id: String(event.id || `${sale.id}-IEVT-${index + 1}`),
+      type: String(event.type || 'Draft updated'),
+      at: typeof event.at === 'string' ? event.at : fallback.createdAt,
+      actor: String(event.actor || 'System'),
+      note: typeof event.note === 'string' ? event.note : undefined,
+    })) : fallback.events
+    return [{
+      ...fallback,
+      id: String(item.id || fallback.id),
+      invoiceNumber: String(item.invoiceNumber || fallback.invoiceNumber),
+      status,
+      issueDate: typeof item.issueDate === 'string' ? item.issueDate : fallback.issueDate,
+      dueDate: typeof item.dueDate === 'string' ? item.dueDate : undefined,
+      currency: 'UGX' as const,
+      paymentTerms: String(item.paymentTerms || fallback.paymentTerms),
+      seller: normalizeInvoiceParty(item.seller, fallback.seller),
+      buyer: normalizeInvoiceParty(item.buyer, fallback.buyer),
+      lines,
+      subtotal: Math.max(0, Number(item.subtotal) || fallback.subtotal),
+      taxTotal: Number.isFinite(Number(item.taxTotal)) && item.taxTotal !== '' ? Math.max(0, Number(item.taxTotal)) : undefined,
+      total: Math.max(0, Number(item.total) || fallback.total),
+      uraReference: typeof item.uraReference === 'string' ? item.uraReference : undefined,
+      verificationUrl: typeof item.verificationUrl === 'string' ? item.verificationUrl : undefined,
+      qrCodeData: typeof item.qrCodeData === 'string' ? item.qrCodeData : undefined,
+      events,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : fallback.createdAt,
+      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : fallback.updatedAt,
+    }]
+  }) : []
+  return [...saved, ...sales.filter((sale) => !seenSaleIds.has(sale.id)).map((sale) => {
+    const customer = customers.find((entry) => entry.id === sale.customerId)
+      ?? customers.find((entry) => entry.name.trim().toLowerCase() === sale.customer.trim().toLowerCase())
+    return createInvoiceDraft(sale, customer, profile)
+  })]
+}
+
 export const loadState = (): ErpState => {
   if (typeof window === 'undefined') return linkCustomerTransactions(cloneSeed())
   try {
@@ -361,9 +848,23 @@ export const loadState = (): ErpState => {
     const employees = (Array.isArray(parsed.employees) ? parsed.employees : defaults.employees).map(normalizeEmployee)
     const employeeDrafts = Array.isArray(parsed.employeeDrafts) ? parsed.employeeDrafts : []
     const attendanceRecords = normalizeAttendanceRecords(parsed.attendanceRecords)
+    const leaveRequests = normalizeLeaveRequests(parsed.leaveRequests)
     const payrollRuns = normalizePayrollRuns(parsed.payrollRuns)
     const salaryAdvances = normalizeSalaryAdvances(parsed.salaryAdvances)
-    return linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, payments, orders, employees, employeeDrafts, attendanceRecords, payrollRuns, salaryAdvances })
+    const materials = Array.isArray(parsed.materials) ? parsed.materials as RawMaterial[] : defaults.materials
+    const stockMovements = Array.isArray(parsed.stockMovements) ? normalizeStockMovements(parsed.stockMovements) : openingMovementsFor(materials)
+    const productionRecipes = normalizeProductionRecipes(parsed.productionRecipes)
+    const productionRuns = normalizeProductionRuns(parsed.productionRuns)
+    const finishedProducts = Array.isArray(parsed.finishedProducts) ? normalizeFinishedProducts(parsed.finishedProducts) : migrateFinishedProducts(productionRecipes, productionRuns)
+    const finishedStockMovements = Array.isArray(parsed.finishedStockMovements) ? normalizeFinishedStockMovements(parsed.finishedStockMovements) : migrateFinishedMovements(finishedProducts, productionRuns)
+    const assets = normalizeAssets(parsed.assets)
+    const assetEvents = normalizeAssetEvents(parsed.assetEvents)
+    const companyProfile = normalizeCompanyProfile(parsed.companyProfile)
+    const invoices = normalizeInvoices(parsed.invoices, sales, customers, companyProfile)
+    const state = linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, invoices, payments, orders, employees, employeeDrafts, attendanceRecords, leaveRequests, payrollRuns, salaryAdvances, materials, stockMovements, productionRecipes, productionRuns, finishedProducts, finishedStockMovements, assets, assetEvents, companyProfile })
+    state.materials = state.materials.map((material) => ({ ...material, quantity: Math.max(0, stockQuantityAtLocation(material.id, stockMovements)) }))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    return state
   } catch {
     return linkCustomerTransactions(cloneSeed())
   }
@@ -516,6 +1017,48 @@ const normalizeAttendanceRecords = (value: unknown): AttendanceRecord[] => {
     .filter((record) => record.employeeId && /^\d{4}-\d{2}-\d{2}$/.test(record.workDate))
 }
 
+const normalizeLeaveRequests = (value: unknown): LeaveRequest[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((request, index) => {
+      const status: LeaveStatus = ['Pending', 'Approved', 'Rejected', 'Cancelled'].includes(String(request.status)) ? request.status as LeaveStatus : 'Pending'
+      const leaveType: LeaveType = ['Sick', 'Maternity/Paternity', 'Compassionate', 'Other'].includes(String(request.leaveType)) ? request.leaveType as LeaveType : 'Other'
+      const decisions: LeaveDecision[] = Array.isArray(request.decisions)
+        ? request.decisions.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')).map((entry, decisionIndex) => ({
+            id: String(entry.id || `LDEC-${index + 1}-${decisionIndex + 1}`),
+            decision: ['Approved', 'Rejected', 'Cancelled'].includes(String(entry.decision)) ? entry.decision as LeaveDecision['decision'] : 'Rejected',
+            actor: String(entry.actor || 'Administrator'),
+            at: typeof entry.at === 'string' ? entry.at : new Date().toISOString(),
+            note: typeof entry.note === 'string' ? entry.note : undefined,
+          }))
+        : []
+      const createdAt = typeof request.requestedAt === 'string' ? request.requestedAt : new Date().toISOString()
+      return {
+        id: String(request.id || createId('LEAVE')),
+        reference: String(request.reference || `LV-${String(index + 1).padStart(4, '0')}`),
+        employeeId: String(request.employeeId || ''),
+        employeeName: String(request.employeeName || 'Unknown employee'),
+        employeeNumber: String(request.employeeNumber || ''),
+        department: String(request.department || ''),
+        role: String(request.role || ''),
+        employeeContact: String(request.employeeContact || ''),
+        leaveType,
+        otherLeaveType: typeof request.otherLeaveType === 'string' ? request.otherLeaveType : undefined,
+        reason: String(request.reason || ''),
+        startDate: String(request.startDate || ''),
+        endDate: String(request.endDate || ''),
+        requestedDays: Math.max(0, Number(request.requestedDays) || 0),
+        handoverEmployeeId: String(request.handoverEmployeeId || ''),
+        handoverName: String(request.handoverName || ''),
+        handoverContact: String(request.handoverContact || ''),
+        status,
+        requestedAt: createdAt,
+        updatedAt: typeof request.updatedAt === 'string' ? request.updatedAt : createdAt,
+        decisions,
+      }
+    }).filter((request) => request.employeeId && /^\d{4}-\d{2}-\d{2}$/.test(request.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(request.endDate))
+}
+
 export const employeeDisplayName = (employee: Partial<Employee>) => {
   const structuredName = [employee.firstName, employee.secondName, employee.otherNames]
     .filter((part): part is string => Boolean(part?.trim()))
@@ -551,12 +1094,22 @@ export const clearState = () => { if (typeof window !== 'undefined') window.loca
 export const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
 export const exportCsv = (filename: string, rows: Record<string, unknown>[]) => { if (!rows.length) return; const headers = Object.keys(rows[0]); const csv = [headers.join(','), ...rows.map(row => headers.map(header => JSON.stringify(row[header] ?? '')).join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url) }
 export const navGroups = [
-  { label: 'Overview', items: [{ label: 'Dashboard', icon: 'LayoutDashboard' }] },
-  { label: 'Sales Department', items: [{ label: 'Sales', icon: 'ShoppingCart' }, { label: 'Credit Sales', icon: 'HandCoins' }, { label: 'Orders', icon: 'ClipboardList' }, { label: 'Receipt Management', icon: 'ReceiptText' }, { label: 'Customer Management', icon: 'Users' }, { label: 'Invoicing', icon: 'FileText' }] },
-  { label: 'HR Department', items: [{ label: 'Employee Profiles', icon: 'ContactRound' }, { label: 'Attendance Management', icon: 'CalendarCheck' }, { label: 'Payroll Management', icon: 'WalletCards' }, { label: 'Salary Advance Management', icon: 'HandCoins' }, { label: 'Leave Management', icon: 'CalendarDays' }, { label: 'Punishment Management', icon: 'ShieldAlert' }] },
-  { label: 'Finance Department', items: [{ label: 'Expenses', icon: 'Receipt' }, { label: 'Reporting', icon: 'ChartNoAxesCombined' }, { label: 'Analysis', icon: 'ChartSpline' }, { label: 'Auditing', icon: 'ScrollText' }] },
+  { label: 'Overview', items: [{ label: 'Dashboard', icon: 'LayoutDashboard' }, { label: 'Approvals', icon: 'ClipboardCheck' }, { label: 'Invoicing', icon: 'FileText' }] },
+  { label: 'Sales Department', items: [{ label: 'Sales', icon: 'ShoppingCart' }, { label: 'Credit Sales', icon: 'HandCoins' }, { label: 'Orders', icon: 'ClipboardList' }, { label: 'Receipt Management', icon: 'ReceiptText' }, { label: 'Customer Management', icon: 'Users' }] },
+  { label: 'HR Department', items: [{ label: 'Employee Profiles', icon: 'ContactRound' }, { label: 'Attendance Management', icon: 'CalendarCheck' }, { label: 'Payroll Management', icon: 'WalletCards' }, { label: 'Salary Advance Management', icon: 'HandCoins' }, { label: 'Leave Management', icon: 'CalendarDays' }, { label: 'Disciplinary Letters', icon: 'ShieldAlert' }] },
+  { label: 'Finance Department', items: [
+    { label: 'Expenses', icon: 'Receipt' },
+    // { label: 'Reporting', icon: 'ChartNoAxesCombined' },
+    { label: 'Analysis', icon: 'ChartSpline' },
+    { label: 'Auditing', icon: 'ScrollText' },
+  ] },
   { label: 'Inventory Department', items: [{ label: 'Raw Material Management', icon: 'Boxes' }, { label: 'Production Management', icon: 'Factory' }, { label: 'Assets Management', icon: 'Building2' }, { label: 'Data Backup', icon: 'DatabaseBackup' }] },
-  { label: 'Settings', items: [{ label: 'Company Profile Management', icon: 'Building' }, { label: 'User Management', icon: 'UserCog' }, { label: 'Finance Settings', icon: 'SlidersHorizontal' }, { label: 'Security Settings', icon: 'LockKeyhole' }] },
+  { label: 'Settings', items: [
+    { label: 'Company Profile Management', icon: 'Building' },
+    { label: 'User Management', icon: 'UserCog' },
+    // { label: 'Finance Settings', icon: 'SlidersHorizontal' },
+    { label: 'Security Settings', icon: 'LockKeyhole' },
+  ] },
 ]
 export const allNavItems = navGroups.flatMap(group => group.items)
 export const chartData = [{ day: 'Mon', sales: 3.8, expenses: 1.2 }, { day: 'Tue', sales: 5.2, expenses: 1.7 }, { day: 'Wed', sales: 4.1, expenses: 1.1 }, { day: 'Thu', sales: 6.4, expenses: 2.2 }, { day: 'Fri', sales: 7.8, expenses: 1.8 }, { day: 'Sat', sales: 5.6, expenses: 1.4 }, { day: 'Sun', sales: 4.9, expenses: 1.1 }]
