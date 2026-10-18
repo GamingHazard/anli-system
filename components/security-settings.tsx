@@ -1,7 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import * as Icons from 'lucide-react'
+import AuditLogPanel from '@/components/audit-log'
+import {
+  ApiError,
+  getSessionProtectionSettings,
+  listActiveSessions,
+  listUsers,
+  revokeActiveSession,
+  updateSessionProtectionSettings,
+  type ActiveSession,
+  type SessionProtectionSettings,
+  type UserAccount,
+} from '@/lib/user-api'
 
 type Role = 'Super Admin' | 'Admin' | 'General Manager' | 'Human Resource' | 'Marketing Manager' | 'Sales Manager' | 'Production Manager' | 'Inventory Manager' | 'Accountant'
 type Capability = 'view' | 'create' | 'edit' | 'delete'
@@ -33,17 +45,128 @@ function Card({ title, detail, icon, children }: { title: string; detail: string
   return <section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><header className="flex items-start gap-3 border-b border-slate-100 px-5 py-4"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600"><Icon className="size-4" /></span><div><h3 className="text-sm font-bold text-slate-900">{title}</h3><p className="mt-1 text-xs leading-4 text-slate-500">{detail}</p></div></header><div className="p-5">{children}</div></section>
 }
 
-export default function SecuritySettings() {
+function SessionDevicePanel({
+  currentUser,
+  onCurrentSessionRevoked,
+}: {
+  currentUser: UserAccount
+  onCurrentSessionRevoked: () => void
+}) {
+  const isSuperAdmin = currentUser.roles.includes('Super Admin')
+  const [settings, setSettings] = useState<SessionProtectionSettings>({
+    privilegedIdle: 15,
+    generalIdle: 30,
+    warningPeriod: 2,
+  })
+  const [accounts, setAccounts] = useState<UserAccount[]>([])
+  const [targetUserId, setTargetUserId] = useState(currentUser.id)
+  const [sessions, setSessions] = useState<ActiveSession[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    if (isSuperAdmin) {
+      Promise.all([getSessionProtectionSettings(), listUsers()])
+        .then(([result, users]) => {
+          if (!mounted) return
+          setSettings(result.sessionProtection)
+          setAccounts(users)
+        })
+        .catch((cause: unknown) => {
+          if (mounted) setError(cause instanceof ApiError ? cause.message : 'Could not load session settings.')
+        })
+    }
+    return () => { mounted = false }
+  }, [isSuperAdmin])
+
+  const refreshSessions = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const result = await listActiveSessions(
+        isSuperAdmin && targetUserId !== currentUser.id ? targetUserId : undefined,
+      )
+      setSessions(result.sessions)
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not load active sessions.')
+    } finally {
+      setLoading(false)
+    }
+  }, [currentUser.id, isSuperAdmin, targetUserId])
+
+  useEffect(() => {
+    void refreshSessions()
+  }, [refreshSessions])
+
+  const saveSettings = async () => {
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await updateSessionProtectionSettings(settings)
+      setSettings(result.sessionProtection)
+      setNotice('Session protection settings saved.')
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not save session settings.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const revokeSession = async (session: ActiveSession) => {
+    if (!window.confirm(`Revoke ${session.current ? 'this session' : 'this device session'}?`)) return
+    setError('')
+    setNotice('')
+    try {
+      await revokeActiveSession(session.id)
+      if (session.current) {
+        onCurrentSessionRevoked()
+        return
+      }
+      setNotice('Session revoked.')
+      await refreshSessions()
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : 'Could not revoke this session.')
+    }
+  }
+
+  return <>
+    <Card title="Session & device protection" detail="Idle expiry is enforced by the server; this browser shows a warning and signs out at the deadline." icon="MonitorLock">
+      <div className="space-y-5">
+        {isSuperAdmin ? <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <NumberField label="Privileged idle timeout" value={settings.privilegedIdle} min={5} max={240} suffix="minutes" onChange={(value) => setSettings((current) => ({ ...current, privilegedIdle: value }))} />
+            <NumberField label="General idle timeout" value={settings.generalIdle} min={5} max={480} suffix="minutes" onChange={(value) => setSettings((current) => ({ ...current, generalIdle: value }))} />
+          </div>
+          <NumberField label="Warn before sign-out" value={settings.warningPeriod} min={1} max={10} suffix="minutes" onChange={(value) => setSettings((current) => ({ ...current, warningPeriod: value }))} />
+          <p className="rounded-md bg-sky-50 px-3 py-2.5 text-[10px] leading-4 text-sky-900">Super Admin and Admin accounts use the privileged timeout. Other roles use the general timeout. Sessions also have a fixed eight-hour maximum lifetime.</p>
+          <button type="button" disabled={saving} onClick={saveSettings} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{saving ? 'Saving…' : 'Save session settings'}</button>
+        </> : <p className="rounded-md bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">Session timeouts are enforced by the server. Contact a Super Admin to change the workspace policy.</p>}
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[10px] leading-4 text-amber-900"><strong>MFA is not enforced.</strong> Multi-factor sign-in requires enrollment and challenge flows that are not yet implemented.</div>
+      </div>
+    </Card>
+    <Card title="Active sessions" detail="Review signed-in devices and revoke sessions you no longer recognize." icon="LaptopMinimalCheck">
+      <div className="space-y-4">
+        {isSuperAdmin && <label className="block max-w-md text-xs font-semibold text-slate-600">Sessions for account<select value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)} className={fieldClass}><option value={currentUser.id}>My sessions</option>{accounts.filter((account) => account.id !== currentUser.id).map((account) => <option key={account.id} value={account.id}>{account.name} · {account.email}</option>)}</select></label>}
+        {error && <p role="alert" className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
+        {notice && <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
+        {loading ? <p className="py-5 text-center text-xs text-slate-500">Loading sessions…</p> : sessions.length ? <ul className="divide-y divide-slate-100">{sessions.map((session) => <li key={session.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-800">{session.userAgent}{session.current && <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] text-emerald-700">This device</span>}</p><p className="mt-1 text-[10px] text-slate-500">Last active {new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(session.lastActivityAt))} · Expires {new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(session.absoluteExpiresAt))}</p></div><button type="button" onClick={() => void revokeSession(session)} className="inline-flex w-fit items-center gap-1.5 rounded-md border border-rose-200 px-2.5 py-1.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50"><Icons.LogOut className="size-3.5" />Revoke</button></li>)}</ul> : <p className="py-5 text-center text-xs text-slate-500">No active sessions found.</p>}
+        <button type="button" onClick={() => void refreshSessions()} disabled={loading} className="text-xs font-semibold text-primary hover:underline disabled:opacity-50">Refresh sessions</button>
+      </div>
+    </Card>
+  </>
+}
+
+export default function SecuritySettings({ currentUser, onCurrentSessionRevoked }: { currentUser: UserAccount; onCurrentSessionRevoked: () => void }) {
   const [section, setSection] = useState<Section>('Protection')
   const [selectedRole, setSelectedRole] = useState<Role>('Admin')
   const [lockoutEnabled, setLockoutEnabled] = useState(true)
   const [maxAttempts, setMaxAttempts] = useState(5)
   const [attemptWindow, setAttemptWindow] = useState(15)
   const [lockDuration, setLockDuration] = useState(15)
-  const [privilegedIdle, setPrivilegedIdle] = useState(15)
-  const [generalIdle, setGeneralIdle] = useState(30)
-  const [warningPeriod, setWarningPeriod] = useState(2)
-  const [mfaRequired, setMfaRequired] = useState(true)
   const [notifyLockouts, setNotifyLockouts] = useState(true)
   const [permissions, setPermissions] = useState(initialPermissions)
 
@@ -52,16 +175,16 @@ export default function SecuritySettings() {
   }
 
   return <div className="animate-in fade-in duration-300">
-    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Settings</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">Security settings</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Configure sign-in protection, role permissions, account recovery, and device backups.</p></div><span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold text-amber-800"><span className="size-1.5 rounded-full bg-amber-500" />Backend not connected</span></header>
+    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Settings</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">Security settings</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Configure sign-in protection, role permissions, account recovery, and device backups.</p></div><span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-800"><span className="size-1.5 rounded-full bg-emerald-500" />Session protection connected</span></header>
 
-    <div role="status" className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><Icons.TriangleAlert className="mt-0.5 size-4 shrink-0" /><p><strong>Configuration preview only.</strong> Changes are temporary and do not affect sign-in, sessions, permissions, accounts, or backups. Enforcement and policy storage require a trusted server-side authentication service. Computer backups also require a registered desktop agent.</p></div>
+    <div role="status" className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><Icons.TriangleAlert className="mt-0.5 size-4 shrink-0" /><p><strong>Some controls are previews only.</strong> Session idle expiry, device revocation, and account security audit records are server-backed. Failed-sign-in policy, MFA, permissions, recovery notifications, and backups are not yet enforced or persisted.</p></div>
 
     <div role="tablist" aria-label="Security settings sections" className="mb-5 flex gap-1 overflow-x-auto border-b border-slate-200">{(['Protection', 'Permissions', 'Backups & recovery', 'Audit'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={section === item} onClick={() => setSection(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${section === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item}</button>)}</div>
 
     {section === 'Protection' && <div className="grid gap-5 xl:grid-cols-2">
       <Card title="Failed sign-in protection" detail="Limit repeated password guesses and make recovery auditable." icon="ShieldAlert"><div className="space-y-5"><Toggle checked={lockoutEnabled} onChange={setLockoutEnabled} title="Enable automatic lockout" description="Lock an account after repeated failed sign-in attempts." /><div className={`grid gap-3 sm:grid-cols-3 ${lockoutEnabled ? '' : 'pointer-events-none opacity-45'}`}><NumberField label="Failed attempts" value={maxAttempts} min={3} max={20} suffix="attempts" onChange={setMaxAttempts} /><NumberField label="Attempt window" value={attemptWindow} min={1} max={120} suffix="minutes" onChange={setAttemptWindow} /><NumberField label="Lock duration" value={lockDuration} min={1} max={1440} suffix="minutes" onChange={setLockDuration} /></div><p className="rounded-md bg-slate-50 px-3 py-2.5 text-[10px] leading-4 text-slate-600">Preview defaults: {maxAttempts} attempts in {attemptWindow} minutes, then a {lockDuration}-minute lock. Add progressive delays, recovery, and rate limits in the authentication service.</p><Toggle checked={notifyLockouts} onChange={setNotifyLockouts} title="Notify Super Admins of lockouts" description="Notification delivery and event history require backend integration." /></div></Card>
 
-      <Card title="Session & device protection" detail="Reduce exposure from unattended or compromised sessions." icon="MonitorLock"><div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2"><NumberField label="Privileged idle timeout" value={privilegedIdle} min={5} max={240} suffix="minutes" onChange={setPrivilegedIdle} /><NumberField label="General idle timeout" value={generalIdle} min={5} max={480} suffix="minutes" onChange={setGeneralIdle} /></div><NumberField label="Warn before sign-out" value={warningPeriod} min={1} max={10} suffix="minutes" onChange={setWarningPeriod} /><p className="rounded-md bg-slate-50 px-3 py-2.5 text-[10px] leading-4 text-slate-600">Session expiry must invalidate server-side sessions and refresh credentials. A client timer alone is not an access control.</p><Toggle checked={mfaRequired} onChange={setMfaRequired} title="Require MFA for privileged roles" description="Requires an identity provider with MFA enrollment and recovery." /><button type="button" disabled className={unavailableButton}><Icons.LaptopMinimalCheck className="size-4" />View active sessions <span className="text-[9px]">Backend required</span></button></div></Card>
+      <SessionDevicePanel currentUser={currentUser} onCurrentSessionRevoked={onCurrentSessionRevoked} />
 
       <Card title="Account recovery" detail="Prevent recovery from bypassing sign-in protection." icon="KeyRound"><ul className="space-y-3 text-xs text-slate-600"><li className="flex gap-2"><Icons.Check className="mt-0.5 size-3.5 shrink-0 text-emerald-700" />Verify identity using a registered second factor.</li><li className="flex gap-2"><Icons.Check className="mt-0.5 size-3.5 shrink-0 text-emerald-700" />Notify the user and Super Admin after credential reset.</li><li className="flex gap-2"><Icons.Check className="mt-0.5 size-3.5 shrink-0 text-emerald-700" />Revoke existing sessions after password or MFA recovery.</li><li className="flex gap-2"><Icons.Check className="mt-0.5 size-3.5 shrink-0 text-emerald-700" />Use generic recovery responses to avoid account enumeration.</li></ul><span className="mt-4 inline-flex rounded-md bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">Policy not applied</span></Card>
 
@@ -72,7 +195,7 @@ export default function SecuritySettings() {
 
     {section === 'Backups & recovery' && <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]"><Card title="Registered computers" detail="Select whose enrolled computers and approved folders participate in automatic backups." icon="Laptop"><div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 px-5 py-10 text-center"><span className="mx-auto grid size-10 place-items-center rounded-lg bg-white text-slate-500 shadow-sm ring-1 ring-slate-200"><Icons.LaptopMinimal className="size-5" /></span><h4 className="mt-3 text-sm font-semibold text-slate-800">No computers enrolled</h4><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-slate-500">Install and register a trusted desktop agent on each user’s computer before assigning users or folders to scheduled backups.</p><button type="button" disabled className={`${unavailableButton} mt-4`}><Icons.Download className="size-4" />Desktop agent required</button></div><p className="mt-4 rounded-md bg-sky-50 px-3 py-2.5 text-[10px] leading-4 text-sky-900">Scheduled backups should run when the selected user is logged out. Folder access must be explicitly approved on that computer.</p></Card><div className="space-y-5"><Card title="Backup safeguards" detail="Controls needed before automatic backups are enabled." icon="ShieldCheck"><ul className="space-y-3 text-xs text-slate-600"><li className="flex gap-2"><Icons.LockKeyhole className="size-4 shrink-0 text-slate-400" />Encrypt archives in transit and at rest.</li><li className="flex gap-2"><Icons.Fingerprint className="size-4 shrink-0 text-slate-400" />Verify archive integrity after upload.</li><li className="flex gap-2"><Icons.History className="size-4 shrink-0 text-slate-400" />Define retention and test restoration.</li><li className="flex gap-2"><Icons.BellRing className="size-4 shrink-0 text-slate-400" />Alert on missed runs or agent failures.</li></ul></Card><Card title="Recovery readiness" detail="A successful upload is not enough to prove recoverability." icon="RotateCcw"><div className="flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Last restore test</span><span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">Not recorded</span></div><p className="mt-3 text-[10px] leading-4 text-slate-500">Verify integrity and test restoration before treating an archive as a reliable backup.</p></Card></div></div>}
 
-    {section === 'Audit' && <Card title="Security activity" detail="Review administrative changes and security events with actor, time, and outcome." icon="ScrollText"><div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 px-5 py-12 text-center"><span className="mx-auto grid size-10 place-items-center rounded-lg bg-white text-slate-500 shadow-sm ring-1 ring-slate-200"><Icons.ListChecks className="size-5" /></span><h4 className="mt-3 text-sm font-semibold text-slate-800">No authoritative audit events</h4><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-slate-500">Sign-in attempts, policy changes, session revocations, account resets, and backup events appear here after server-side audit logging is connected.</p><span className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800"><Icons.Server className="size-3.5" />Backend required</span></div><div className="mt-4 flex flex-wrap gap-2 text-[10px] text-slate-500">{['Login / lockout', 'Permission changes', 'Account actions', 'Backup events'].map((event) => <span key={event} className="rounded-md bg-slate-100 px-2 py-1">{event}</span>)}</div></Card>}
+    {section === 'Audit' && <Card title="Account security audit" detail="Review server-recorded account and session security events. Actor and affected account are shown separately." icon="ScrollText"><AuditLogPanel currentUser={currentUser} /></Card>}
 
     <footer className="mt-5 flex flex-col gap-2 border-t border-slate-200 pt-4 text-[10px] text-slate-400 sm:flex-row sm:items-center sm:justify-between"><span>Draft control values are not saved or applied.</span><button type="button" disabled className={unavailableButton}><Icons.Save className="size-3.5" />Save requires authentication backend</button></footer>
   </div>

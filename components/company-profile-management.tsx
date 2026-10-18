@@ -2,24 +2,31 @@
 
 import { useEffect, useState } from 'react'
 import * as Icons from 'lucide-react'
-import { emptyCompanyProfile, type CompanyProfile } from '@/lib/erp'
+import type { CompanyProfile } from '@/lib/erp'
+import { ApiError, removeCompanyLogo, updateCompanyProfile, uploadCompanyLogo } from '@/lib/user-api'
 
 type Props = {
   profile: CompanyProfile
+  canEdit: boolean
   onSave: (profile: CompanyProfile) => void
 }
 
 const fieldClass = 'mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-ring/20'
 const labelClass = 'block text-xs font-semibold text-slate-600'
 
-export default function CompanyProfileManagement({ profile, onSave }: Props) {
+type CompanyTextField = Exclude<keyof CompanyProfile, 'logo'>
+
+export default function CompanyProfileManagement({ profile, canEdit, onSave }: Props) {
   const [values, setValues] = useState<CompanyProfile>(profile)
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoError, setLogoError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
   const hasProfile = Boolean(profile.legalName.trim())
   const isDirty = JSON.stringify(values) !== JSON.stringify(profile)
+  const hasChanges = isDirty || Boolean(logoFile)
 
   useEffect(() => setValues(profile), [profile])
   useEffect(() => {
@@ -32,9 +39,10 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
     return () => URL.revokeObjectURL(previewUrl)
   }, [logoFile])
 
-  const update = (key: keyof CompanyProfile, value: string) => {
+  const update = (key: CompanyTextField, value: string) => {
     setValues((current) => ({ ...current, [key]: value }))
     setSaveMessage('')
+    setErrorMessage('')
   }
 
   const cancel = () => {
@@ -42,43 +50,105 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
     setLogoFile(null)
     setLogoError('')
     setSaveMessage('')
+    setErrorMessage('')
   }
 
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const legalName = values.legalName.trim()
     if (!legalName) {
-      setSaveMessage('Enter the company’s legal name before saving.')
+      setErrorMessage('Enter the company’s legal name before saving.')
       return
     }
-    const next = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value.trim()])) as CompanyProfile
-    onSave(next)
-    setValues(next)
-    setSaveMessage('Company profile saved in this browser.')
+    setSaving(true)
+    setSaveMessage('')
+    setErrorMessage('')
+    const textFields: Omit<CompanyProfile, 'logo'> = {
+      legalName: values.legalName.trim(),
+      tradingName: values.tradingName.trim(),
+      email: values.email.trim(),
+      phone: values.phone.trim(),
+      website: values.website.trim(),
+      addressLine1: values.addressLine1.trim(),
+      addressLine2: values.addressLine2.trim(),
+      city: values.city.trim(),
+      region: values.region.trim(),
+      postalCode: values.postalCode.trim(),
+      country: values.country.trim(),
+      tin: values.tin.trim(),
+      registrationNumber: values.registrationNumber.trim(),
+      registrationAuthority: values.registrationAuthority.trim(),
+    }
+    let profileTextSaved = false
+    try {
+      const result = await updateCompanyProfile(textFields)
+      let next = result.profile
+      profileTextSaved = true
+      onSave(next)
+      setValues(next)
+      if (logoFile) {
+        const logoResult = await uploadCompanyLogo(logoFile)
+        next = { ...next, logo: logoResult.logo }
+        onSave(next)
+        setValues(next)
+        setLogoFile(null)
+      }
+      setSaveMessage('Company profile saved to the server.')
+    } catch (cause) {
+      const message = cause instanceof ApiError ? cause.message : 'Could not save the company profile.'
+      setErrorMessage(profileTextSaved ? `Profile text was saved, but the logo upload failed: ${message}` : message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const selectLogo = (file?: File) => {
     setLogoError('')
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setLogoError('Choose an image file to preview the logo.')
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setLogoError('Choose a PNG, JPEG, or WebP image.')
+      setSaveMessage('')
       return
     }
     if (file.size > 2 * 1024 * 1024) {
       setLogoError('Choose an image smaller than 2 MB.')
+      setSaveMessage('')
       return
     }
     setLogoFile(file)
     setSaveMessage('')
+    setErrorMessage('')
   }
 
-  const field = (key: keyof CompanyProfile, label: string, options: { type?: string; required?: boolean; placeholder?: string; wide?: boolean } = {}) => (
+  const removeLogo = async () => {
+    setLogoError('')
+    setErrorMessage('')
+    setSaving(true)
+    try {
+      if (logoFile) {
+        setLogoFile(null)
+        return
+      }
+      const result = await removeCompanyLogo()
+      const next = { ...profile, logo: result.logo }
+      onSave(next)
+      setValues((current) => ({ ...current, logo: result.logo }))
+      setSaveMessage('Company logo removed.')
+    } catch (cause) {
+      setErrorMessage(cause instanceof ApiError ? cause.message : 'Could not remove the company logo.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const field = (key: CompanyTextField, label: string, options: { type?: string; required?: boolean; placeholder?: string; wide?: boolean } = {}) => (
     <label key={key} className={`${labelClass} ${options.wide ? 'sm:col-span-2' : ''}`}>
       {label}{options.required && <span className="ml-1 text-rose-600">*</span>}
       <input
         name={key}
         type={options.type ?? 'text'}
         required={options.required}
+        disabled={!canEdit || saving}
         value={values[key]}
         onChange={(event) => update(key, event.target.value)}
         placeholder={options.placeholder}
@@ -102,6 +172,7 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
       </span>
     </header>
 
+    {!canEdit && <p role="status" className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">Profile editing is available to Super Admins after the current server profile has loaded.</p>}
     <form onSubmit={submit}>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-5">
@@ -114,16 +185,17 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
                 <div className={labelClass}>Company logo <span className="font-normal text-slate-400">Optional</span></div>
                 <div className="mt-2 flex flex-col gap-4 rounded-lg border border-slate-200 bg-slate-50/60 p-4 sm:flex-row sm:items-center">
                   <div className="grid size-20 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-400">
-                    {logoPreview ? <img src={logoPreview} alt="Temporary company logo preview" className="size-full object-contain p-2" /> : <Icons.Building2 className="size-7" />}
+                    {logoPreview || profile.logo.url ? <img src={logoPreview || profile.logo.url} alt="Company logo preview" className="size-full object-contain p-2" /> : <Icons.Building2 className="size-7" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Icons.Upload className="size-3.5" />{logoFile ? 'Replace logo' : 'Choose logo'}<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" aria-label="Choose company logo" onChange={(event) => selectLogo(event.target.files?.[0])} className="sr-only" /></label>
-                      {logoFile && <button type="button" onClick={() => { setLogoFile(null); setLogoError(''); }} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"><Icons.Trash2 className="size-3.5" />Remove</button>}
+                      {canEdit && <label className={`inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 ${saving ? 'pointer-events-none opacity-50' : ''}`}><Icons.Upload className="size-3.5" />{logoFile || profile.logo.url ? 'Replace logo' : 'Choose logo'}<input type="file" accept="image/png,image/jpeg,image/webp" aria-label="Choose company logo" disabled={saving} onChange={(event) => { selectLogo(event.target.files?.[0]); event.currentTarget.value = ''; }} className="sr-only" /></label>}
+                      {canEdit && (logoFile || profile.logo.url) && <button type="button" disabled={saving} onClick={() => void removeLogo()} className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"><Icons.Trash2 className="size-3.5" />{logoFile ? 'Discard selection' : 'Remove logo'}</button>}
                     </div>
-                    <p className="mt-2 text-[11px] leading-4 text-slate-500">PNG, JPG, WebP, or SVG · up to 2 MB. Preview only; the image is not stored when you save.</p>
+                    <p className="mt-2 text-[11px] leading-4 text-slate-500">PNG, JPG, or WebP · up to 2 MB. Uploaded securely and stored with Cloudinary.</p>
                     {logoFile && <p className="mt-1 truncate text-[10px] text-slate-600">Selected: {logoFile.name}</p>}
                     {logoError && <p role="alert" className="mt-2 text-xs text-rose-700">{logoError}</p>}
+                    {errorMessage && <p role="alert" className="mt-2 text-xs text-rose-700">{errorMessage}</p>}
                   </div>
                 </div>
               </div>
@@ -166,7 +238,7 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
             <div className="border-b border-slate-100 px-5 py-4"><h3 id="company-preview-title" className="text-sm font-bold text-slate-900">Identity preview</h3><p className="mt-1 text-xs text-slate-500">Preview updates as you edit.</p></div>
             <div className="p-5">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-slate-400">{logoPreview ? <img src={logoPreview} alt="" className="size-full object-contain p-1" /> : <Icons.Building2 className="size-5" />}</span>
+                <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-slate-400">{logoPreview || profile.logo.url ? <img src={logoPreview || profile.logo.url} alt="" className="size-full object-contain p-1" /> : <Icons.Building2 className="size-5" />}</span>
                 <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{displayName}</p><p className="mt-1 truncate text-[11px] text-slate-500">{values.legalName.trim() || 'Registered company name'}</p></div>
               </div>
               <dl className="mt-5 divide-y divide-slate-100 border-y border-slate-100 text-xs">
@@ -174,7 +246,7 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
                 <div className="flex items-center gap-3 py-3"><Icons.Phone className="size-3.5 shrink-0 text-slate-400" /><dt className="sr-only">Phone</dt><dd className="min-w-0 truncate text-slate-600">{values.phone || 'Phone not added'}</dd></div>
                 <div className="flex items-start gap-3 py-3"><Icons.MapPin className="mt-0.5 size-3.5 shrink-0 text-slate-400" /><dt className="sr-only">Address</dt><dd className="min-w-0 break-words text-slate-600">{[values.addressLine1, values.city, values.region, values.country].filter(Boolean).join(', ') || 'Address not added'}</dd></div>
               </dl>
-              <div className="mt-4 flex items-start gap-2 rounded-md bg-sky-50 px-3 py-2.5 text-[11px] leading-4 text-sky-800"><Icons.Info className="mt-0.5 size-3.5 shrink-0" /><p>Profile text is saved in this browser. Logo storage and account synchronization are not connected.</p></div>
+              <div className="mt-4 flex items-start gap-2 rounded-md bg-sky-50 px-3 py-2.5 text-[11px] leading-4 text-sky-800"><Icons.Info className="mt-0.5 size-3.5 shrink-0" /><p>Company profile is shared from the server. Changes to branding apply to current workspace views; issued documents keep their original details.</p></div>
             </div>
           </section>
           <section className="rounded-xl border border-slate-200 bg-white p-5">
@@ -192,13 +264,13 @@ export default function CompanyProfileManagement({ profile, onSave }: Props) {
         </aside>
       </div>
 
-      <footer className="sticky bottom-0 z-10 mt-5 flex flex-col gap-3 border-t border-slate-200 bg-[#f7f8fc]/95 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-h-5 text-xs" aria-live="polite">{saveMessage && <span className={saveMessage.startsWith('Company profile saved') ? 'text-emerald-700' : 'text-rose-700'}>{saveMessage}</span>}</div>
+      {canEdit && <footer className="sticky bottom-0 z-10 mt-5 flex flex-col gap-3 border-t border-slate-200 bg-[#f7f8fc]/95 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-h-5 text-xs" aria-live="polite">{saveMessage && <span className="text-emerald-700">{saveMessage}</span>}{errorMessage && <span role="alert" className="text-rose-700">{errorMessage}</span>}</div>
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={cancel} disabled={!isDirty && !logoFile && !logoError} className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">Cancel</button>
-          <button type="submit" disabled={!isDirty} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45"><Icons.Save className="size-4" />Save changes</button>
+          <button type="button" onClick={cancel} disabled={saving || (!isDirty && !logoFile && !logoError)} className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">Cancel</button>
+          <button type="submit" disabled={saving || !hasChanges} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-45"><Icons.Save className="size-4" />{saving ? 'Saving…' : 'Save changes'}</button>
         </div>
-      </footer>
+      </footer>}
     </form>
   </div>
 }

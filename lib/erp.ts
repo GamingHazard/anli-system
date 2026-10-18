@@ -4,7 +4,7 @@ export type Sale = { id: string; date: string; customer: string; customerId?: st
 export type SalePayment = { id: string; saleId: string; amount: number; date: string; method: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Check'; txnID?: string; note?: string; recordedAt: string }
 export type InvoiceStatus = 'Draft' | 'Ready to submit' | 'Submitted' | 'Issued' | 'Failed' | 'Cancelled' | 'Credit note'
 export type InvoiceLine = { id: string; description: string; quantity: number; unitPrice: number; lineTotal: number; taxCategory?: string; taxRate?: number; taxAmount?: number }
-export type InvoicePartySnapshot = { name: string; tin?: string; email?: string; phone?: string; address?: string }
+export type InvoicePartySnapshot = { name: string; tin?: string; email?: string; phone?: string; address?: string; logoUrl?: string }
 export type InvoiceEvent = { id: string; type: string; at: string; actor: string; note?: string }
 export type Invoice = {
   id: string; invoiceNumber: string; saleId: string; saleReference: string; status: InvoiceStatus
@@ -261,28 +261,39 @@ export type CompanyProfile = {
   legalName: string; tradingName: string; email: string; phone: string; website: string
   addressLine1: string; addressLine2: string; city: string; region: string; postalCode: string; country: string
   tin: string; registrationNumber: string; registrationAuthority: string
+  logo: { url: string; publicId: string }
 }
 export type ErpState = { sales: Sale[]; invoices: Invoice[]; payments: SalePayment[]; orders: Order[]; employees: Employee[]; employeeDrafts: EmployeeDraft[]; attendanceRecords: AttendanceRecord[]; leaveRequests: LeaveRequest[]; payrollRuns: PayrollRun[]; salaryAdvances: SalaryAdvance[]; expenses: Expense[]; customers: Customer[]; materials: RawMaterial[]; stockMovements: StockMovement[]; productionRecipes: ProductionRecipe[]; productionRuns: ProductionRun[]; finishedProducts: FinishedProduct[]; finishedStockMovements: FinishedStockMovement[]; assets: CompanyAsset[]; assetEvents: AssetEvent[]; companyProfile: CompanyProfile; activities: Activity[] }
 
 export const emptyCompanyProfile: CompanyProfile = {
   legalName: '', tradingName: '', email: '', phone: '', website: '', addressLine1: '', addressLine2: '',
   city: '', region: '', postalCode: '', country: '', tin: '', registrationNumber: '', registrationAuthority: '',
+  logo: { url: '', publicId: '' },
 }
 
 const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
   const profile = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  return Object.fromEntries(Object.keys(emptyCompanyProfile).map((key) => [
-    key,
-    typeof profile[key] === 'string' ? profile[key] : '',
-  ])) as unknown as CompanyProfile
+  const logo = profile.logo && typeof profile.logo === 'object'
+    ? profile.logo as Record<string, unknown>
+    : {}
+  const textFields = Object.keys(emptyCompanyProfile).filter((key) => key !== 'logo')
+  return {
+    ...Object.fromEntries(textFields.map((key) => [
+      key,
+      typeof profile[key] === 'string' ? profile[key] : '',
+    ])),
+    logo: {
+      url: typeof logo.url === 'string' ? logo.url : '',
+      publicId: typeof logo.publicId === 'string' ? logo.publicId : '',
+    },
+  } as CompanyProfile
 }
 
 export const createInvoiceDraft = (sale: Sale, customer: Customer | undefined, profile: CompanyProfile): Invoice => {
   const now = new Date().toISOString()
   const quantity = Math.max(1, Number(sale.quantity) || 1)
   const unitPrice = sale.total / quantity
-  const sellerName = profile.legalName || profile.tradingName || ''
-  const address = [profile.addressLine1, profile.addressLine2, profile.city, profile.region, profile.country].filter(Boolean).join(', ')
+  const seller = createInvoiceSellerSnapshot(profile)
   const buyerAddress = [customer?.district, customer?.region, customer?.country].filter(Boolean).join(', ')
   return {
     id: `INV-${sale.id}`,
@@ -294,7 +305,7 @@ export const createInvoiceDraft = (sale: Sale, customer: Customer | undefined, p
     dueDate: sale.dueDate,
     currency: 'UGX',
     paymentTerms: sale.paymentTerms || 'Same-day',
-    seller: { name: sellerName, tin: profile.tin || undefined, email: profile.email || undefined, phone: profile.phone || undefined, address: address || undefined },
+    seller,
     buyer: { name: sale.customer, tin: customer?.tin || undefined, email: customer?.email || undefined, phone: customer?.phone || undefined, address: buyerAddress || undefined },
     lines: [{ id: `${sale.id}-LINE-1`, description: sale.product, quantity, unitPrice, lineTotal: sale.total }],
     subtotal: sale.total,
@@ -302,6 +313,19 @@ export const createInvoiceDraft = (sale: Sale, customer: Customer | undefined, p
     events: [{ id: `${sale.id}-INVOICE-DRAFT`, type: 'Draft created', at: now, actor: 'System', note: 'Automatic invoice draft created from sale.' }],
     createdAt: now,
     updatedAt: now,
+  }
+}
+
+export const createInvoiceSellerSnapshot = (profile: CompanyProfile): InvoicePartySnapshot => {
+  const sellerName = profile.legalName || profile.tradingName || ''
+  const address = [profile.addressLine1, profile.addressLine2, profile.city, profile.region, profile.country].filter(Boolean).join(', ')
+  return {
+    name: sellerName,
+    tin: profile.tin || undefined,
+    email: profile.email || undefined,
+    phone: profile.phone || undefined,
+    address: address || undefined,
+    logoUrl: profile.logo.url || undefined,
   }
 }
 
@@ -772,6 +796,7 @@ const normalizeInvoiceParty = (value: unknown, fallback: InvoicePartySnapshot): 
     email: typeof party.email === 'string' ? party.email : fallback.email,
     phone: typeof party.phone === 'string' ? party.phone : fallback.phone,
     address: typeof party.address === 'string' ? party.address : fallback.address,
+    logoUrl: typeof party.logoUrl === 'string' ? party.logoUrl : undefined,
   }
 }
 
@@ -863,7 +888,7 @@ export const loadState = (): ErpState => {
     const invoices = normalizeInvoices(parsed.invoices, sales, customers, companyProfile)
     const state = linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, invoices, payments, orders, employees, employeeDrafts, attendanceRecords, leaveRequests, payrollRuns, salaryAdvances, materials, stockMovements, productionRecipes, productionRuns, finishedProducts, finishedStockMovements, assets, assetEvents, companyProfile })
     state.materials = state.materials.map((material) => ({ ...material, quantity: Math.max(0, stockQuantityAtLocation(material.id, stockMovements)) }))
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, companyProfile: emptyCompanyProfile }))
     return state
   } catch {
     return linkCustomerTransactions(cloneSeed())
@@ -1089,7 +1114,7 @@ const normalizeEmployee = (value: unknown): Employee => {
   return employee
 }
 
-export const saveState = (state: ErpState) => { if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) }
+export const saveState = (state: ErpState) => { if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, companyProfile: emptyCompanyProfile })) }
 export const clearState = () => { if (typeof window !== 'undefined') window.localStorage.removeItem(STORAGE_KEY) }
 export const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
 export const exportCsv = (filename: string, rows: Record<string, unknown>[]) => { if (!rows.length) return; const headers = Object.keys(rows[0]); const csv = [headers.join(','), ...rows.map(row => headers.map(header => JSON.stringify(row[header] ?? '')).join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url) }
