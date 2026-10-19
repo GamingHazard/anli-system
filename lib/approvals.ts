@@ -25,15 +25,36 @@ function addInstallments(firstDueDate: string, frequency: SalaryAdvance['propose
     const plannedAmount = Math.min(installment, remaining)
     schedule.push({ id: makeId(), dueDate, plannedAmount })
     remaining -= plannedAmount
-    const next = new Date(`${dueDate}T12:00:00.000Z`)
-    if (frequency === 'Weekly') next.setUTCDate(next.getUTCDate() + 7)
-    else next.setUTCMonth(next.getUTCMonth() + 1)
-    dueDate = next.toISOString().slice(0, 10)
+    dueDate = nextRepaymentDate(dueDate, frequency)
   }
   return schedule
 }
 
-export function decideSalaryAdvance(advance: SalaryAdvance, decision: ApprovalDecision, actor: string, note = '', terms?: { amount: number; frequency: SalaryAdvance['proposedFrequency']; installment: number; firstDueDate: string }): SalaryAdvance {
+function nextRepaymentDate(date: string, frequency: SalaryAdvance['proposedFrequency']) {
+  const [year, month, day] = date.split('-').map(Number)
+  if (frequency === 'Weekly') {
+    const next = new Date(Date.UTC(year, month - 1, day + 7))
+    return next.toISOString().slice(0, 10)
+  }
+  const lastDayOfNextMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+  const next = new Date(Date.UTC(year, month, Math.min(day, lastDayOfNextMonth)))
+  return next.toISOString().slice(0, 10)
+}
+
+function firstInstallmentDate(dateApproved: string, frequency: SalaryAdvance['proposedFrequency']) {
+  return nextRepaymentDate(dateApproved, frequency)
+}
+
+function companyDate(date: Date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Kampala',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+export function decideSalaryAdvance(advance: SalaryAdvance, decision: ApprovalDecision, actor: string, note = '', terms?: { amount: number; frequency: SalaryAdvance['proposedFrequency']; installment: number }): SalaryAdvance {
   if (advance.status !== 'Pending review') return advance
   const now = new Date().toISOString()
   const entry = { id: approvalEventId('AACT'), actor, at: now, action: decision === 'Approved' ? 'Request approved' : 'Request rejected', note: note.trim() || (decision === 'Approved' ? `Approved ${advance.requestedAmount} with proposed repayment terms.` : undefined) }
@@ -43,7 +64,8 @@ export function decideSalaryAdvance(advance: SalaryAdvance, decision: ApprovalDe
   const approvedAmount = terms?.amount ?? advance.requestedAmount
   const approvedFrequency = terms?.frequency ?? advance.proposedFrequency
   const approvedInstallment = terms?.installment ?? advance.proposedInstallmentAmount
-  const firstDueDate = terms?.firstDueDate ?? advance.proposedFirstDueDate
+  const dateApproved = companyDate(new Date())
+  const firstDueDate = firstInstallmentDate(dateApproved, approvedFrequency)
   const schedule = addInstallments(firstDueDate, approvedFrequency, approvedInstallment, approvedAmount, () => approvalEventId('ASCH'))
   return {
     ...advance,
@@ -51,7 +73,7 @@ export function decideSalaryAdvance(advance: SalaryAdvance, decision: ApprovalDe
     approvedAmount,
     approvedFrequency,
     approvedInstallmentAmount: approvedInstallment,
-    firstDueDate,
+    dateApproved,
     decisionAt: now,
     decisionBy: actor,
     schedule,

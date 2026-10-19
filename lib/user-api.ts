@@ -1,4 +1,4 @@
-import type { CompanyProfile } from './erp'
+import type { AdvanceRepaymentMethod, AdvanceRepaymentFrequency, AttendanceRecord, AttendanceStatus, CompanyProfile, Employee, EmployeeDraft, EmployeeDocument, SalaryAdvance } from './erp'
 
 export const USER_ROLES = [
   'Super Admin',
@@ -155,6 +155,336 @@ export function uploadCompanyLogo(file: File) {
 
 export function removeCompanyLogo() {
   return request<{ logo: CompanyLogo }>('/profile-settings/logo', { method: 'DELETE' })
+}
+
+export type EmployeeDraftRecord = {
+  id: string
+  employee: Partial<Employee>
+  currentStep: number
+  updatedAt: string
+}
+
+function normalizeEmployee(employee: Employee): Employee {
+  const documents = (employee.documents ?? []).map((document) => {
+    const absoluteUrl = document.url.startsWith('http')
+      ? document.url
+      : `${apiBaseUrl}${document.url}`;
+    return { ...document, url: absoluteUrl, download_Url: absoluteUrl }
+  })
+  return {
+    ...employee,
+    dateOfBirth: employee.dateOfBirth?.slice(0, 10),
+    image: employee.image ?? {
+      url: employee.photoUrl ?? '',
+      publicId: '',
+    },
+    photoUrl: employee.image?.url ?? employee.photoUrl ?? '',
+    documents,
+    salary: employee.salary ?? 0,
+  }
+}
+
+export async function listEmployees(filters: {
+  q?: string
+  department?: string
+  category?: string
+  frequency?: string
+  status?: string
+} = {}) {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) search.set(key, value)
+  }
+  const suffix = search.size ? `?${search.toString()}` : ''
+  const result = await request<{ employees: Employee[]; limited: boolean }>(`/employees${suffix}`)
+  return { ...result, employees: result.employees.map(normalizeEmployee) }
+}
+
+export async function getEmployee(id: string) {
+  const result = await request<{ employee: Employee; limited: boolean }>(`/employees/${encodeURIComponent(id)}`)
+  return { ...result, employee: normalizeEmployee(result.employee) }
+}
+
+export async function createEmployee(employee: Omit<Employee, 'id' | 'number' | 'documents' | 'image' | 'photoUrl'>) {
+  const result = await request<{ employee: Employee }>('/employees', {
+    method: 'POST',
+    body: JSON.stringify(employee),
+  })
+  return normalizeEmployee(result.employee)
+}
+
+export async function updateEmployee(id: string, employee: Partial<Employee>) {
+  const result = await request<{ employee: Employee }>(`/employees/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(employee),
+  })
+  return normalizeEmployee(result.employee)
+}
+
+export async function deactivateEmployee(id: string) {
+  const result = await request<{ employee: Employee }>(`/employees/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  return normalizeEmployee(result.employee)
+}
+
+export function uploadEmployeeImage(id: string, file: File) {
+  const body = new FormData()
+  body.set('image', file)
+  return request<{ image: { url: string; publicId: string } }>(`/employees/${encodeURIComponent(id)}/image`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function removeEmployeeImage(id: string) {
+  return request<{ image: { url: string; publicId: string } }>(`/employees/${encodeURIComponent(id)}/image`, {
+    method: 'DELETE',
+  })
+}
+
+export function uploadEmployeeDocument(id: string, title: string, file: File) {
+  const body = new FormData()
+  body.set('title', title)
+  body.set('document', file)
+  return request<{ document: EmployeeDocument }>(`/employees/${encodeURIComponent(id)}/documents`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function removeEmployeeDocument(employeeId: string, documentId: string) {
+  return request<{ removed: boolean }>(
+    `/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(documentId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function getEmployeeDocumentDownload(employeeId: string, documentId: string) {
+  return request<{ url: string; expiresInSeconds: number }>(
+    `/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(documentId)}/download`,
+  )
+}
+
+export function listEmployeeDrafts() {
+  return request<{ drafts: EmployeeDraftRecord[] }>('/employees/drafts')
+}
+
+export function saveEmployeeDraft(draft: EmployeeDraft) {
+  return request<{ draft: EmployeeDraftRecord }>(`/employees/drafts/${encodeURIComponent(draft.id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ employee: draft.employee, currentStep: draft.currentStep }),
+  })
+}
+
+export function deleteEmployeeDraft(id: string) {
+  return request<{ removed: boolean }>(`/employees/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function importLocalEmployees(employees: Array<{ migrationKey: string; employee: Record<string, unknown> }>) {
+  return request<{
+    imported: number
+    alreadyImported: number
+    failed: number
+    results: Array<{ index: number; migrationKey?: string; status: string; error?: string; employeeId?: string }>
+  }>('/employees/import', {
+    method: 'POST',
+    body: JSON.stringify({ employees }),
+  })
+}
+
+export async function listAttendance(month: string, employeeId?: string) {
+  const search = new URLSearchParams({ month })
+  if (employeeId) search.set('employeeId', employeeId)
+  const result = await request<{ records: AttendanceRecord[] }>(`/attendance?${search.toString()}`)
+  return {
+    records: result.records.map((record) => ({
+      ...record,
+      id: String(record.id),
+      employeeId: String(record.employeeId),
+      status: record.status as AttendanceStatus,
+      updatedAt: String(record.updatedAt),
+    })),
+  }
+}
+
+export function saveDailyAttendance(
+  workDate: string,
+  entries: Array<Pick<AttendanceRecord, 'employeeId' | 'status' | 'halfDay' | 'late' | 'note'>>,
+) {
+  return request<{ records: AttendanceRecord[] }>(`/attendance/daily/${encodeURIComponent(workDate)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ entries }),
+  })
+}
+
+function normalizeSalaryAdvance(advance: SalaryAdvance): SalaryAdvance {
+  const raw = advance as SalaryAdvance & Record<string, unknown>
+  const hr = raw.hrDecision as (SalaryAdvance['hrDecision'] & { _id?: string }) | undefined
+  const gm = raw.gmDecision as (SalaryAdvance['gmDecision'] & { _id?: string }) | undefined
+  return {
+    ...advance,
+    id: String(raw.id || raw._id || ''),
+    employeeId: raw.employeeId ? String(raw.employeeId) : '',
+    requestedAt: typeof raw.requestedAt === 'string' ? raw.requestedAt : new Date(String(raw.requestedAt)).toISOString(),
+    dateTaken: String(raw.dateTaken).slice(0, 10),
+    dateApproved: typeof raw.dateApproved === 'string' ? raw.dateApproved.slice(0, 10) : undefined,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date(String(raw.createdAt)).toISOString(),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date(String(raw.updatedAt)).toISOString(),
+    legacyUnverified: Boolean(raw.legacyUnverified),
+    legacyStatus: typeof raw.legacyStatus === 'string' ? raw.legacyStatus : undefined,
+    legacyReference: typeof raw.legacyReference === 'string' ? raw.legacyReference : undefined,
+    hrDecision: hr ? { ...hr, actorId: String(hr.actorId), decidedAt: new Date(hr.decidedAt).toISOString() } : undefined,
+    gmDecision: gm ? { ...gm, actorId: String(gm.actorId), decidedAt: new Date(gm.decidedAt).toISOString() } : undefined,
+    decisionAt: gm?.decidedAt || hr?.decidedAt,
+    decisionBy: gm?.actorName || hr?.actorName,
+    attachments: (raw.attachments || []).map((attachment) => {
+      const item = attachment as typeof advance.attachments[number] & { _id?: string; uploadedBy?: string }
+      return { ...item, id: String(item.id || item._id || ''), url: String(item.url || ''), dataUrl: undefined }
+    }),
+    schedule: (raw.schedule || []).map((entry) => {
+      const item = entry as SalaryAdvance['schedule'][number] & { _id?: string }
+      return { ...item, id: String(item.id || item._id || ''), dueDate: String(item.dueDate).slice(0, 10) }
+    }),
+    repayments: (raw.repayments || []).map((repayment) => {
+      const item = repayment as SalaryAdvance['repayments'][number] & { _id?: string }
+      return {
+        ...item,
+        id: String(item.id || item._id || ''),
+        date: String(item.date).slice(0, 10),
+        recordedAt: typeof item.recordedAt === 'string' ? item.recordedAt : new Date(String(item.recordedAt)).toISOString(),
+        scheduleEntryIds: item.scheduleEntryIds?.map(String),
+      }
+    }),
+    activity: (raw.activity || []).map((entry) => {
+      const item = entry as SalaryAdvance['activity'][number] & { _id?: string; actorName?: string; actorId?: string }
+      return { ...item, id: String(item.id || item._id || ''), actor: item.actorName || 'System', at: typeof item.at === 'string' ? item.at : new Date(String(item.at)).toISOString() }
+    }),
+  }
+}
+
+export type SalaryAdvanceRequestInput = {
+  employeeId: string
+  requestedAmount: number
+  reason: string
+  dateTaken: string
+  proposedFrequency: AdvanceRepaymentFrequency
+  proposedInstallmentAmount: number
+}
+
+export type SalaryAdvanceDecisionInput = {
+  decision: 'Approved' | 'Rejected'
+  note: string
+  amount?: number
+  frequency?: AdvanceRepaymentFrequency
+  installmentAmount?: number
+}
+
+export type LegacySalaryAdvanceImportRecord = Pick<
+  SalaryAdvance,
+  | 'id'
+  | 'reference'
+  | 'employeeId'
+  | 'employeeNumber'
+  | 'employeeName'
+  | 'department'
+  | 'role'
+  | 'category'
+  | 'paymentFrequency'
+  | 'requestedAmount'
+  | 'reason'
+  | 'dateTaken'
+  | 'requestedAt'
+  | 'proposedFrequency'
+  | 'proposedInstallmentAmount'
+  | 'status'
+  | 'approvedAmount'
+  | 'approvedFrequency'
+  | 'approvedInstallmentAmount'
+  | 'dateApproved'
+  | 'disbursement'
+  | 'schedule'
+  | 'repayments'
+>
+
+export type LegacySalaryAdvanceImportPreview = {
+  records: Array<{
+    index: number
+    reference: string
+    employeeName?: string
+    employeeMatched: boolean
+    importable: boolean
+    duplicate: boolean
+    reason: string
+  }>
+  importableCount: number
+  duplicateCount: number
+}
+
+export function previewLegacySalaryAdvances(advances: LegacySalaryAdvanceImportRecord[]) {
+  return request<LegacySalaryAdvanceImportPreview>('/salary-advances/legacy-import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ advances }),
+  })
+}
+
+export function importLegacySalaryAdvances(advances: LegacySalaryAdvanceImportRecord[]) {
+  return request<{ imported: SalaryAdvance[]; skipped: Array<{ index: number; reference: string; reason: string }> }>('/salary-advances/legacy-import', {
+    method: 'POST',
+    body: JSON.stringify({ advances }),
+  })
+}
+
+export async function listSalaryAdvances(filters: { employeeId?: string; status?: string } = {}) {
+  const search = new URLSearchParams()
+  if (filters.employeeId) search.set('employeeId', filters.employeeId)
+  if (filters.status) search.set('status', filters.status)
+  const suffix = search.size ? `?${search.toString()}` : ''
+  const result = await request<{ advances: SalaryAdvance[] }>(`/salary-advances${suffix}`)
+  return { advances: result.advances.map(normalizeSalaryAdvance) }
+}
+
+export async function createSalaryAdvance(input: SalaryAdvanceRequestInput) {
+  const result = await request<{ advance: SalaryAdvance }>('/salary-advances', { method: 'POST', body: JSON.stringify(input) })
+  return normalizeSalaryAdvance(result.advance)
+}
+
+export async function decideSalaryAdvanceHr(id: string, input: SalaryAdvanceDecisionInput) {
+  const result = await request<{ advance: SalaryAdvance }>(`/salary-advances/${encodeURIComponent(id)}/hr-decision`, { method: 'POST', body: JSON.stringify(input) })
+  return normalizeSalaryAdvance(result.advance)
+}
+
+export async function decideSalaryAdvanceGeneralManager(id: string, input: SalaryAdvanceDecisionInput) {
+  const result = await request<{ advance: SalaryAdvance }>(`/salary-advances/${encodeURIComponent(id)}/gm-decision`, { method: 'POST', body: JSON.stringify(input) })
+  return normalizeSalaryAdvance(result.advance)
+}
+
+export async function recordSalaryAdvanceDisbursement(id: string, input: { amount: number; date: string; method: Exclude<AdvanceRepaymentMethod, 'Payroll'>; reference?: string }) {
+  const result = await request<{ advance: SalaryAdvance }>(`/salary-advances/${encodeURIComponent(id)}/disbursement`, { method: 'POST', body: JSON.stringify(input) })
+  return normalizeSalaryAdvance(result.advance)
+}
+
+export async function recordSalaryAdvanceRepayment(id: string, input: { amount: number; date: string; method: Exclude<AdvanceRepaymentMethod, 'Payroll'>; reference?: string; note?: string }) {
+  const result = await request<{ advance: SalaryAdvance }>(`/salary-advances/${encodeURIComponent(id)}/repayments`, { method: 'POST', body: JSON.stringify(input) })
+  return normalizeSalaryAdvance(result.advance)
+}
+
+export function uploadSalaryAdvanceAttachment(id: string, file: File) {
+  const body = new FormData()
+  body.set('file', file)
+  return request<{ attachment: SalaryAdvance['attachments'][number] }>(`/salary-advances/${encodeURIComponent(id)}/attachments`, { method: 'POST', body })
+}
+
+export function removeSalaryAdvanceAttachment(id: string, attachmentId: string) {
+  return request<{ removed: boolean }>(`/salary-advances/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}`, { method: 'DELETE' })
+}
+
+export function getSalaryAdvanceAttachmentDownload(id: string, attachmentId: string) {
+  return request<{ url: string; expiresInSeconds: number }>(`/salary-advances/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}/download`)
+}
+
+export function recordPayrollSalaryAdvanceRepayments(input: { payrollRunId: string; payslipId: string; employeeId: string; periodEnd: string }) {
+  return request<{ repayments: Array<{ advanceId: string; advanceReference: string; amount: number; date: string; method: 'Payroll'; id: string; idempotent: boolean }>; idempotent: boolean }>('/salary-advances/payroll-repayments', { method: 'POST', body: JSON.stringify(input) })
 }
 
 export function signIn(email: string, password: string) {

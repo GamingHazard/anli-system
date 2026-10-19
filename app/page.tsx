@@ -54,6 +54,12 @@ import InvoiceManagement from "@/components/invoice-management";
 import LeaveManagement from "@/components/leave-management";
 import DisciplinaryLettersPage from "@/components/disciplinary-letters";
 import {
+  useAttendanceMonth,
+  useAttendanceYear,
+  useSaveDailyAttendance,
+} from "@/lib/attendance-queries";
+import { useSalaryAdvances } from "@/lib/salary-advance-queries";
+import {
   balanceForSale,
   chartData,
   cloneSeed,
@@ -63,6 +69,8 @@ import {
   employeeDisplayName,
   exportCsv,
   formatDate,
+  getLegacyEmployeeImport,
+  clearLegacyEmployeeImport,
   initials,
   isWithinDays,
   loadState,
@@ -88,8 +96,22 @@ import {
   type ActiveSession,
   ApiError,
   changePassword,
+  createEmployee as createEmployeeApi,
+  deactivateEmployee as deactivateEmployeeApi,
+  deleteEmployeeDraft,
+  importLocalEmployees,
+  listEmployeeDrafts,
+  listEmployees,
+  removeEmployeeDocument,
+  removeEmployeeImage,
+  saveEmployeeDraft,
+  updateEmployee as updateEmployeeApi,
+  uploadEmployeeDocument,
+  uploadEmployeeImage,
   getCompanyProfile,
   getCurrentSession,
+  getEmployee,
+  getEmployeeDocumentDownload,
   getPublicCompanyBrand,
   reportSessionActivity,
   signIn,
@@ -759,6 +781,13 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [state, setState] = useState<ErpState>(loadState);
+  const selectedEmployee = state.employees.find(
+    (item) => item.id === selectedId,
+  );
+  const [employeesLoaded, setEmployeesLoaded] = useState(false);
+  const [employeeLoadError, setEmployeeLoadError] = useState("");
+  const [employeeDetailLoading, setEmployeeDetailLoading] = useState(false);
+  const [employeeLoadAttempt, setEmployeeLoadAttempt] = useState(0);
   const [publicBrand, setPublicBrand] = useState<PublicCompanyBrand>({
     companyName: "Lumina ERP",
     logoUrl: "",
@@ -838,6 +867,83 @@ function App() {
       mounted = false;
     };
   }, [currentUser, companyProfileLoadAttempt]);
+  useEffect(() => {
+    if (!currentUser || currentUser.mustChangePassword) {
+      setEmployeesLoaded(false);
+      setEmployeeLoadError("");
+      setState((current) => ({
+        ...current,
+        employees: [],
+        employeeDrafts: [],
+      }));
+      return;
+    }
+    let mounted = true;
+    setEmployeesLoaded(false);
+    setEmployeeLoadError("");
+    listEmployees()
+      .then(({ employees }) => {
+        if (mounted) {
+          setState((current) => ({ ...current, employees }));
+          setEmployeesLoaded(true);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!mounted) return;
+        setEmployeeLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "Could not load employee profiles.",
+        );
+        setEmployeesLoaded(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser, employeeLoadAttempt]);
+  useEffect(() => {
+    if (
+      active !== "Employee Profile Details" ||
+      !selectedId ||
+      !employeesLoaded ||
+      selectedEmployee
+    )
+      return;
+    let mounted = true;
+    setEmployeeDetailLoading(true);
+    setEmployeeLoadError("");
+    getEmployee(selectedId)
+      .then(({ employee }) => {
+        if (mounted)
+          setState((current) => ({
+            ...current,
+            employees: [
+              employee,
+              ...current.employees.filter((item) => item.id !== employee.id),
+            ],
+          }));
+      })
+      .catch((error: unknown) => {
+        if (mounted)
+          setEmployeeLoadError(
+            error instanceof ApiError
+              ? error.message
+              : "Could not load this employee profile.",
+          );
+      })
+      .finally(() => {
+        if (mounted) setEmployeeDetailLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [
+    active,
+    selectedId,
+    employeesLoaded,
+    selectedEmployee,
+    employeeLoadAttempt,
+  ]);
   useEffect(() => {
     let mounted = true;
     getCurrentSession()
@@ -1038,6 +1144,7 @@ function App() {
               <PayrollManagementPage
                 state={state}
                 updateState={updateState}
+                currentUser={currentUser}
                 initialRunId={selectedPayrollRunId}
                 onViewEmployee={(id) => {
                   setSelectedId(id);
@@ -1047,7 +1154,7 @@ function App() {
             ) : active === "Salary Advance Management" ? (
               <SalaryAdvanceManagement
                 state={state}
-                updateState={updateState}
+                currentUser={currentUser}
                 initialAdvanceId={selectedAdvanceId}
                 onViewEmployee={(id) => {
                   setSelectedId(id);
@@ -1055,23 +1162,78 @@ function App() {
                 }}
               />
             ) : active === "Employee Profile Details" ? (
-              <EmployeeDetails
-                employee={
-                  state.employees.find((item) => item.id === selectedId) ||
-                  state.employees[0]
-                }
-                state={state}
-                updateState={updateState}
-                onBack={() => setActive("Employee Profiles")}
-                onViewPayrollRun={(id) => {
-                  setSelectedPayrollRunId(id);
-                  setActive("Payroll Management");
-                }}
-                onViewAdvance={(id) => {
-                  setSelectedAdvanceId(id);
-                  setActive("Salary Advance Management");
-                }}
-              />
+              !employeesLoaded ? (
+                <p role="status" className="p-8 text-sm text-slate-500">
+                  Loading employee profile…
+                </p>
+              ) : employeeLoadError ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+                >
+                  {employeeLoadError}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEmployeeLoadAttempt((attempt) => attempt + 1)
+                    }
+                    className="ml-3 font-semibold underline"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : employeeDetailLoading ? (
+                <p role="status" className="p-8 text-sm text-slate-500">
+                  Loading employee profile…
+                </p>
+              ) : selectedEmployee ? (
+                <EmployeeDetails
+                  employee={selectedEmployee}
+                  state={state}
+                  updateState={updateState}
+                  canManage={currentUser.roles.some((role) =>
+                    ["Super Admin", "Admin", "Human Resource"].includes(role),
+                  )}
+                  canReadAdvances={currentUser.roles.some((role) =>
+                    [
+                      "Super Admin",
+                      "Admin",
+                      "Human Resource",
+                      "General Manager",
+                    ].includes(role),
+                  )}
+                  onEmployeeUpdated={(employee) =>
+                    setState((current) => ({
+                      ...current,
+                      employees: current.employees.map((item) =>
+                        item.id === employee.id ? employee : item,
+                      ),
+                    }))
+                  }
+                  onBack={() => setActive("Employee Profiles")}
+                  onViewPayrollRun={(id) => {
+                    setSelectedPayrollRunId(id);
+                    setActive("Payroll Management");
+                  }}
+                  onViewAdvance={(id) => {
+                    setSelectedAdvanceId(id);
+                    setActive("Salary Advance Management");
+                  }}
+                />
+              ) : (
+                <section className="rounded-lg border border-slate-200 bg-white p-8 text-center">
+                  <p className="text-sm text-slate-600">
+                    Select an employee profile from the directory.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActive("Employee Profiles")}
+                    className="mt-3 text-sm font-semibold text-primary"
+                  >
+                    Back to employee directory
+                  </button>
+                </section>
+              )
             ) : active === "Customer Details" ? (
               <CustomerDetails
                 customer={
@@ -1085,13 +1247,46 @@ function App() {
               <EmployeeDirectory
                 state={state}
                 updateState={updateState}
+                loading={!employeesLoaded}
+                loadError={employeeLoadError}
+                currentUser={currentUser}
+                onRetry={() => setEmployeeLoadAttempt((attempt) => attempt + 1)}
                 onView={(id) => {
                   setSelectedId(id);
                   setActive("Employee Profile Details");
                 }}
+                onEmployeeCreated={(employee) =>
+                  setState((current) => ({
+                    ...current,
+                    employees: [
+                      employee,
+                      ...current.employees.filter(
+                        (item) => item.id !== employee.id,
+                      ),
+                    ],
+                  }))
+                }
               />
             ) : active === "Attendance Management" ? (
-              <AttendancePage state={state} updateState={updateState} />
+              currentUser.roles.some((role) =>
+                ["Super Admin", "Admin", "Human Resource"].includes(role),
+              ) ? (
+                <AttendancePage
+                  state={state}
+                  employeesLoaded={employeesLoaded}
+                  employeeLoadError={employeeLoadError}
+                  onRetry={() =>
+                    setEmployeeLoadAttempt((attempt) => attempt + 1)
+                  }
+                />
+              ) : (
+                <section
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+                >
+                  You do not have permission to access attendance records.
+                </section>
+              )
             ) : (
               <ModulePage
                 active={active}
@@ -1107,6 +1302,10 @@ function App() {
                 }
                 onCompanyProfileSave={applyCompanyProfile}
                 onCurrentSessionRevoked={handleSessionEnded}
+                onViewSalaryAdvance={(id) => {
+                  setSelectedAdvanceId(id);
+                  setActive("Salary Advance Management");
+                }}
                 onView={(id) => {
                   setSelectedId(id);
                   setActive(
@@ -1135,21 +1334,34 @@ function companyWorkDate() {
 
 function AttendancePage({
   state,
-  updateState,
+  employeesLoaded,
+  employeeLoadError,
+  onRetry,
 }: {
   state: ErpState;
-  updateState: (next: ErpState) => void;
+  employeesLoaded: boolean;
+  employeeLoadError: string;
+  onRetry: () => void;
 }) {
   const [workDate, setWorkDate] = useState(companyWorkDate);
   const [department, setDepartment] = useState("All departments");
   const [search, setSearch] = useState("");
   const [showDialog, setShowDialog] = useState(false);
+  const [attendanceYear, setAttendanceYear] = useState(() =>
+    Number(companyWorkDate().slice(0, 4)),
+  );
+  const [saveError, setSaveError] = useState("");
   const [expandedMonth, setExpandedMonth] = useState(
     companyWorkDate().slice(0, 7),
   );
   const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(
     null,
   );
+  const attendanceQuery = useAttendanceYear(attendanceYear);
+  const dayAttendanceQuery = useAttendanceMonth(workDate.slice(0, 7));
+  const attendanceError = attendanceQuery.error ?? dayAttendanceQuery.error;
+  const attendanceRecords = attendanceQuery.records;
+  const saveMutation = useSaveDailyAttendance();
   const activeEmployees = state.employees.filter(
     (employee) => employee.status === "Active",
   );
@@ -1158,19 +1370,30 @@ function AttendancePage({
       activeEmployees.map((employee) => employee.department).filter(Boolean),
     ),
   ].sort();
+  const recordedEmployeeIds = new Set([
+    ...attendanceRecords.map((record) => record.employeeId),
+    ...(dayAttendanceQuery.data?.records ?? []).map(
+      (record) => record.employeeId,
+    ),
+  ]);
+  const historyEmployees = state.employees.filter(
+    (employee) =>
+      (employee.status === "Active" || recordedEmployeeIds.has(employee.id)) &&
+      (department === "All departments" || employee.department === department),
+  );
   const departmentEmployees = activeEmployees.filter(
     (employee) =>
       department === "All departments" || employee.department === department,
   );
-  const employees = departmentEmployees.filter((employee) =>
+  const employees = historyEmployees.filter((employee) =>
     `${employeeDisplayName(employee)} ${employee.number} ${employee.department} ${employee.role}`
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
-  const dayRecords = state.attendanceRecords.filter(
+  const dayRecords = (dayAttendanceQuery.data?.records ?? []).filter(
     (record) =>
       record.workDate === workDate &&
-      departmentEmployees.some((employee) => employee.id === record.employeeId),
+      historyEmployees.some((employee) => employee.id === record.employeeId),
   );
   const presentRecords = dayRecords.filter(
     (record) => record.status === "Present",
@@ -1183,10 +1406,15 @@ function AttendancePage({
     (record) => record.status === "On leave",
   ).length;
   const currentMonth = companyWorkDate().slice(0, 7);
+  const currentYear = Number(currentMonth.slice(0, 4));
+  const historyYears = Array.from(
+    { length: Math.max(1, Math.max(currentYear, attendanceYear) - 1999) },
+    (_, index) => Math.max(currentYear, attendanceYear) - index,
+  );
   const attendanceMonths = [
     ...new Set([
-      currentMonth,
-      ...state.attendanceRecords
+      ...(attendanceYear === currentYear ? [currentMonth] : []),
+      ...attendanceRecords
         .map((record) => record.workDate.slice(0, 7))
         .filter(Boolean),
     ]),
@@ -1211,12 +1439,10 @@ function AttendancePage({
       weekday: "short",
     }).format(new Date(`${date}T12:00:00+03:00`));
   const monthSummary = (month: string) => {
-    const records = state.attendanceRecords.filter(
+    const records = attendanceRecords.filter(
       (record) =>
         record.workDate.startsWith(`${month}-`) &&
-        departmentEmployees.some(
-          (employee) => employee.id === record.employeeId,
-        ),
+        historyEmployees.some((employee) => employee.id === record.employeeId),
     );
     return {
       recordedDays: new Set(records.map((record) => record.workDate)).size,
@@ -1231,7 +1457,7 @@ function AttendancePage({
       leave: records.filter((record) => record.status === "On leave").length,
     };
   };
-  const saveAttendance = (
+  const saveAttendance = async (
     updates: Array<
       Pick<
         AttendanceRecord,
@@ -1239,35 +1465,17 @@ function AttendancePage({
       >
     >,
   ) => {
-    const updatedEmployeeIds = new Set(
-      updates.map((record) => record.employeeId),
-    );
-    const untouchedRecords = state.attendanceRecords.filter(
-      (record) =>
-        record.workDate !== workDate ||
-        !updatedEmployeeIds.has(record.employeeId),
-    );
-    const savedRecords = updates
-      .filter((record) => record.status !== "Unmarked")
-      .map((update) => {
-        const existing = state.attendanceRecords.find(
-          (record) =>
-            record.employeeId === update.employeeId &&
-            record.workDate === workDate,
-        );
-        return {
-          ...existing,
-          ...update,
-          id: existing?.id ?? createId("ATT"),
-          workDate,
-          updatedAt: new Date().toISOString(),
-        } as AttendanceRecord;
-      });
-    updateState({
-      ...state,
-      attendanceRecords: [...untouchedRecords, ...savedRecords],
-    });
-    setShowDialog(false);
+    setSaveError("");
+    try {
+      await saveMutation.mutateAsync({ workDate, entries: updates });
+      setShowDialog(false);
+    } catch (error) {
+      setSaveError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not save attendance.",
+      );
+    }
   };
 
   return (
@@ -1287,15 +1495,98 @@ function AttendancePage({
               dateStyle: "full",
             }).format(new Date(`${workDate}T12:00:00+03:00`))}
           </p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Only server-saved attendance is shown. Previous browser-local
+            records remain archived in that browser and were not imported.
+          </p>
         </div>
         <button
           type="button"
-          onClick={() => setShowDialog(true)}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6]"
+          onClick={() => {
+            setSaveError("");
+            setShowDialog(true);
+          }}
+          disabled={
+            !employeesLoaded ||
+            Boolean(employeeLoadError) ||
+            dayAttendanceQuery.isLoading ||
+            dayAttendanceQuery.isError ||
+            departmentEmployees.length === 0 ||
+            saveMutation.isPending
+          }
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Icons.ClipboardCheck className="size-4" /> Add attendance
         </button>
       </div>
+      {!employeesLoaded && (
+        <p
+          role="status"
+          className="mb-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500"
+        >
+          Loading employee roster…
+        </p>
+      )}
+      {employeeLoadError && (
+        <div
+          role="alert"
+          className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+        >
+          <span>{employeeLoadError}</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="font-semibold underline"
+          >
+            Retry employee roster
+          </button>
+        </div>
+      )}
+      {employeesLoaded &&
+        !employeeLoadError &&
+        activeEmployees.length === 0 && (
+          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            No active employee profiles are available to record attendance.
+          </p>
+        )}
+      {saveError && (
+        <p
+          role="alert"
+          className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+        >
+          {saveError}
+        </p>
+      )}
+      {(attendanceQuery.isLoading || dayAttendanceQuery.isLoading) && (
+        <p
+          role="status"
+          className="mb-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500"
+        >
+          Loading attendance history…
+        </p>
+      )}
+      {(attendanceQuery.isError || dayAttendanceQuery.isError) && (
+        <div
+          role="alert"
+          className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+        >
+          <span>
+            {attendanceError instanceof ApiError
+              ? attendanceError.message
+              : "Could not load attendance history."}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              void attendanceQuery.refetch();
+              void dayAttendanceQuery.refetch();
+            }}
+            className="font-semibold underline"
+          >
+            Try again
+          </button>
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="text-xs font-semibold text-slate-600">
           Work date for entry
@@ -1304,11 +1595,28 @@ function AttendancePage({
             type="date"
             value={workDate}
             onChange={(event) => {
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) return;
               setWorkDate(event.target.value);
+              setAttendanceYear(Number(event.target.value.slice(0, 4)));
               setExpandedMonth(event.target.value.slice(0, 7));
             }}
             className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-normal"
           />
+        </label>
+        <label className="text-xs font-semibold text-slate-600">
+          History year
+          <select
+            aria-label="Attendance history year"
+            value={attendanceYear}
+            onChange={(event) => setAttendanceYear(Number(event.target.value))}
+            className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-normal"
+          >
+            {historyYears.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="text-xs font-semibold text-slate-600">
           Department
@@ -1384,209 +1692,228 @@ function AttendancePage({
           </span>
         </div>
         <div className="divide-y divide-slate-100">
-          {attendanceMonths.map((month) => {
-            const summary = monthSummary(month);
-            const dates = monthDates(month);
-            const expanded = expandedMonth === month;
-            return (
-              <section key={month} className="min-w-0">
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  onClick={() => setExpandedMonth(expanded ? "" : month)}
-                  className="flex w-full flex-col gap-3 px-4 py-3 text-left hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <span className="flex items-center gap-2">
-                    <Icons.ChevronRight
-                      className={`size-4 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`}
-                    />
-                    <span className="text-sm font-bold text-slate-800">
-                      {monthLabel(month)}
-                    </span>
-                    {month === currentMonth && (
-                      <span className="rounded bg-[#f1eafd] px-1.5 py-0.5 text-[9px] font-semibold text-[#6d28d9]">
-                        Current month
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex flex-wrap gap-x-3 gap-y-1 pl-6 text-[10px] text-slate-500 sm:pl-0">
-                    <span>{summary.recordedDays} days recorded</span>
-                    <span className="text-emerald-700">
-                      {summary.present} present
-                    </span>
-                    <span className="text-orange-700">
-                      {summary.halfDays} half-days
-                    </span>
-                    <span className="text-blue-700">{summary.late} late</span>
-                    <span className="text-rose-700">
-                      {summary.absent} absent
-                    </span>
-                    <span className="text-sky-700">{summary.leave} leave</span>
-                  </span>
-                </button>
-                {expanded && (
-                  <div
-                    id={`attendance-month-${month}`}
-                    className="border-t border-slate-100"
+          {attendanceQuery.isError ? (
+            <p className="px-5 py-10 text-center text-xs text-rose-700">
+              Attendance history could not be loaded. Use Try again above.
+            </p>
+          ) : attendanceQuery.isLoading ? (
+            <p
+              role="status"
+              className="px-5 py-10 text-center text-xs text-slate-400"
+            >
+              Loading monthly history…
+            </p>
+          ) : attendanceMonths.length === 0 ? (
+            <p className="px-5 py-10 text-center text-xs text-slate-400">
+              No attendance records for {attendanceYear}.
+            </p>
+          ) : (
+            attendanceMonths.map((month) => {
+              const summary = monthSummary(month);
+              const dates = monthDates(month);
+              const expanded = expandedMonth === month;
+              return (
+                <section key={month} className="min-w-0">
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedMonth(expanded ? "" : month)}
+                    className="flex w-full flex-col gap-3 px-4 py-3 text-left hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-slate-100 px-4 py-2 text-[10px] text-slate-500">
-                      <span className="flex items-center gap-1.5">
-                        <i className="size-2 rounded-sm bg-emerald-500" />
-                        Present
+                    <span className="flex items-center gap-2">
+                      <Icons.ChevronRight
+                        className={`size-4 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`}
+                      />
+                      <span className="text-sm font-bold text-slate-800">
+                        {monthLabel(month)}
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        <i className="size-2 rounded-sm bg-rose-500" />
-                        Absent
+                      {month === currentMonth && (
+                        <span className="rounded bg-[#f1eafd] px-1.5 py-0.5 text-[9px] font-semibold text-[#6d28d9]">
+                          Current month
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex flex-wrap gap-x-3 gap-y-1 pl-6 text-[10px] text-slate-500 sm:pl-0">
+                      <span>{summary.recordedDays} days recorded</span>
+                      <span className="text-emerald-700">
+                        {summary.present} present
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        <i className="size-2 rounded-sm bg-orange-400" />
-                        Half-day
+                      <span className="text-orange-700">
+                        {summary.halfDays} half-days
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        <i className="size-2 rounded-sm bg-sky-500" />
-                        On leave
+                      <span className="text-blue-700">{summary.late} late</span>
+                      <span className="text-rose-700">
+                        {summary.absent} absent
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        <i className="grid size-3 place-items-center rounded-full bg-blue-600 text-[8px] font-bold not-italic text-white">
-                          L
-                        </i>
-                        Late
+                      <span className="text-sky-700">
+                        {summary.leave} leave
                       </span>
-                      <span className="text-slate-400">
-                        Blank cells are unmarked; weekends are not assumed
-                        absent.
-                      </span>
-                    </div>
-                    <div className="overflow-auto">
-                      <table className="w-full border-separate border-spacing-0 text-center text-[10px]">
-                        <thead className="sticky top-0 z-20 bg-slate-50 text-slate-500">
-                          <tr>
-                            <th className="sticky left-0 z-30 min-w-[190px] border-b border-r border-slate-200 bg-slate-50 px-3 py-2 text-left">
-                              Employee
-                            </th>
-                            {dates.map((date) => {
-                              const weekend = ["Sat", "Sun"].includes(
-                                dayOfWeek(date),
-                              );
-                              return (
-                                <th
-                                  key={date}
-                                  className={`min-w-9 border-b border-slate-100 px-1 py-2 ${weekend ? "bg-slate-100/70 text-slate-400" : ""}`}
-                                >
-                                  <span className="block font-semibold">
-                                    {Number(date.slice(-2))}
-                                  </span>
-                                  <span className="mt-0.5 block text-[8px] font-normal">
-                                    {dayOfWeek(date)}
-                                  </span>
-                                </th>
-                              );
-                            })}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {employees.map((employee) => (
-                            <tr key={employee.id} className="group">
-                              <th
-                                scope="row"
-                                className="sticky left-0 z-10 border-b border-r border-slate-100 bg-white px-3 py-2 text-left group-hover:bg-slate-50"
-                              >
-                                <span className="block truncate text-[11px] font-semibold text-slate-800">
-                                  {employeeDisplayName(employee)}
-                                </span>
-                                <span className="mt-0.5 block truncate text-[9px] font-normal text-slate-400">
-                                  {employee.number} · {employee.department}
-                                </span>
+                    </span>
+                  </button>
+                  {expanded && (
+                    <div
+                      id={`attendance-month-${month}`}
+                      className="border-t border-slate-100"
+                    >
+                      <div className="flex flex-wrap gap-x-4 gap-y-2 border-b border-slate-100 px-4 py-2 text-[10px] text-slate-500">
+                        <span className="flex items-center gap-1.5">
+                          <i className="size-2 rounded-sm bg-emerald-500" />
+                          Present
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <i className="size-2 rounded-sm bg-rose-500" />
+                          Absent
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <i className="size-2 rounded-sm bg-orange-400" />
+                          Half-day
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <i className="size-2 rounded-sm bg-sky-500" />
+                          On leave
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <i className="grid size-3 place-items-center rounded-full bg-blue-600 text-[8px] font-bold not-italic text-white">
+                            L
+                          </i>
+                          Late
+                        </span>
+                        <span className="text-slate-400">
+                          Blank cells are unmarked; weekends are not assumed
+                          absent.
+                        </span>
+                      </div>
+                      <div className="overflow-auto">
+                        <table className="w-full border-separate border-spacing-0 text-center text-[10px]">
+                          <thead className="sticky top-0 z-20 bg-slate-50 text-slate-500">
+                            <tr>
+                              <th className="sticky left-0 z-30 min-w-[190px] border-b border-r border-slate-200 bg-slate-50 px-3 py-2 text-left">
+                                Employee
                               </th>
                               {dates.map((date) => {
-                                const record = state.attendanceRecords.find(
-                                  (item) =>
-                                    item.employeeId === employee.id &&
-                                    item.workDate === date,
-                                );
-                                const isWeekend = ["Sat", "Sun"].includes(
+                                const weekend = ["Sat", "Sun"].includes(
                                   dayOfWeek(date),
                                 );
-                                const cellColor = !record
-                                  ? "bg-transparent text-slate-300"
-                                  : record.status === "Absent"
-                                    ? "bg-rose-500 text-white"
-                                    : record.status === "On leave"
-                                      ? "bg-sky-500 text-white"
-                                      : record.status === "Present" &&
-                                          record.halfDay
-                                        ? "bg-orange-400 text-white"
-                                        : record.status === "Present"
-                                          ? "bg-emerald-500 text-white"
-                                          : "bg-transparent text-slate-300";
-                                const cellLabel = !record
-                                  ? `${employeeDisplayName(employee)}, ${date}: unmarked${isWeekend ? ", weekend" : ""}`
-                                  : `${employeeDisplayName(employee)}, ${date}: ${record.status}${record.status === "Present" ? (record.halfDay ? ", half day" : ", full day") : ""}${record.status === "Present" && record.late ? ", late" : ""}`;
                                 return (
-                                  <td
+                                  <th
                                     key={date}
-                                    className={`border-b border-slate-100 px-0.5 py-1 ${isWeekend && !record ? "bg-slate-50/70" : ""}`}
+                                    className={`min-w-9 border-b border-slate-100 px-1 py-2 ${weekend ? "bg-slate-100/70 text-slate-400" : ""}`}
                                   >
-                                    <button
-                                      type="button"
-                                      aria-label={cellLabel}
-                                      title={cellLabel}
-                                      onClick={() => {
-                                        setWorkDate(date);
-                                        setExpandedMonth(month);
-                                        if (record) setSelectedRecord(record);
-                                        else setShowDialog(true);
-                                      }}
-                                      className={`relative mx-auto grid size-7 place-items-center rounded-md font-semibold transition hover:ring-2 hover:ring-slate-300 ${cellColor}`}
-                                    >
-                                      <span>
-                                        {record
-                                          ? record.status === "Absent"
-                                            ? "A"
-                                            : record.status === "On leave"
-                                              ? "L"
-                                              : record.status === "Present" &&
-                                                  record.halfDay
-                                                ? "½"
-                                                : record.status === "Present"
-                                                  ? "P"
-                                                  : "·"
-                                          : "·"}
-                                      </span>
-                                      {record?.status === "Present" &&
-                                        record.late && (
-                                          <span
-                                            aria-hidden="true"
-                                            className="absolute -right-0.5 -top-0.5 grid size-3 place-items-center rounded-full bg-blue-600 text-[7px] font-bold leading-none text-white"
-                                          >
-                                            L
-                                          </span>
-                                        )}
-                                    </button>
-                                  </td>
+                                    <span className="block font-semibold">
+                                      {Number(date.slice(-2))}
+                                    </span>
+                                    <span className="mt-0.5 block text-[8px] font-normal">
+                                      {dayOfWeek(date)}
+                                    </span>
+                                  </th>
                                 );
                               })}
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {employees.map((employee) => (
+                              <tr key={employee.id} className="group">
+                                <th
+                                  scope="row"
+                                  className="sticky left-0 z-10 border-b border-r border-slate-100 bg-white px-3 py-2 text-left group-hover:bg-slate-50"
+                                >
+                                  <span className="block truncate text-[11px] font-semibold text-slate-800">
+                                    {employeeDisplayName(employee)}
+                                  </span>
+                                  <span className="mt-0.5 block truncate text-[9px] font-normal text-slate-400">
+                                    {employee.number} · {employee.department}
+                                  </span>
+                                </th>
+                                {dates.map((date) => {
+                                  const record = attendanceRecords.find(
+                                    (item) =>
+                                      item.employeeId === employee.id &&
+                                      item.workDate === date,
+                                  );
+                                  const isWeekend = ["Sat", "Sun"].includes(
+                                    dayOfWeek(date),
+                                  );
+                                  const cellColor = !record
+                                    ? "bg-transparent text-slate-300"
+                                    : record.status === "Absent"
+                                      ? "bg-rose-500 text-white"
+                                      : record.status === "On leave"
+                                        ? "bg-sky-500 text-white"
+                                        : record.status === "Present" &&
+                                            record.halfDay
+                                          ? "bg-orange-400 text-white"
+                                          : record.status === "Present"
+                                            ? "bg-emerald-500 text-white"
+                                            : "bg-transparent text-slate-300";
+                                  const cellLabel = !record
+                                    ? `${employeeDisplayName(employee)}, ${date}: unmarked${isWeekend ? ", weekend" : ""}`
+                                    : `${employeeDisplayName(employee)}, ${date}: ${record.status}${record.status === "Present" ? (record.halfDay ? ", half day" : ", full day") : ""}${record.status === "Present" && record.late ? ", late" : ""}`;
+                                  return (
+                                    <td
+                                      key={date}
+                                      className={`border-b border-slate-100 px-0.5 py-1 ${isWeekend && !record ? "bg-slate-50/70" : ""}`}
+                                    >
+                                      <button
+                                        type="button"
+                                        aria-label={cellLabel}
+                                        title={cellLabel}
+                                        onClick={() => {
+                                          setWorkDate(date);
+                                          setExpandedMonth(month);
+                                          if (record) setSelectedRecord(record);
+                                          else setShowDialog(true);
+                                        }}
+                                        className={`relative mx-auto grid size-7 place-items-center rounded-md font-semibold transition hover:ring-2 hover:ring-slate-300 ${cellColor}`}
+                                      >
+                                        <span>
+                                          {record
+                                            ? record.status === "Absent"
+                                              ? "A"
+                                              : record.status === "On leave"
+                                                ? "L"
+                                                : record.status === "Present" &&
+                                                    record.halfDay
+                                                  ? "½"
+                                                  : record.status === "Present"
+                                                    ? "P"
+                                                    : "·"
+                                            : "·"}
+                                        </span>
+                                        {record?.status === "Present" &&
+                                          record.late && (
+                                            <span
+                                              aria-hidden="true"
+                                              className="absolute -right-0.5 -top-0.5 grid size-3 place-items-center rounded-full bg-blue-600 text-[7px] font-bold leading-none text-white"
+                                            >
+                                              L
+                                            </span>
+                                          )}
+                                      </button>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </section>
-            );
-          })}
+                  )}
+                </section>
+              );
+            })
+          )}
         </div>
       </section>
       {showDialog && (
         <AttendanceDialog
           employees={departmentEmployees}
-          records={state.attendanceRecords.filter(
-            (record) => record.workDate === workDate,
-          )}
+          records={dayAttendanceQuery.data?.records ?? []}
           workDate={workDate}
           onClose={() => setShowDialog(false)}
           onSave={saveAttendance}
+          isSaving={saveMutation.isPending}
+          error={saveError}
         />
       )}
       {selectedRecord && (
@@ -1653,11 +1980,15 @@ function AttendanceDialog({
   workDate,
   onClose,
   onSave,
+  isSaving,
+  error,
 }: {
   employees: Employee[];
   records: AttendanceRecord[];
   workDate: string;
   onClose: () => void;
+  isSaving: boolean;
+  error: string;
   onSave: (
     records: Array<
       Pick<
@@ -1744,6 +2075,14 @@ function AttendanceDialog({
             <X className="size-4" />
           </button>
         </header>
+        {error && (
+          <p
+            role="alert"
+            className="mx-4 mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+          >
+            {error}
+          </p>
+        )}
         <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between">
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
             <Search className="size-4 text-slate-400" />
@@ -1874,6 +2213,7 @@ function AttendanceDialog({
             </button>
             <button
               type="button"
+              disabled={isSaving}
               onClick={() =>
                 onSave(
                   employees.map((employee) => ({
@@ -1882,9 +2222,9 @@ function AttendanceDialog({
                   })),
                 )
               }
-              className="rounded-lg bg-[#6d28d9] px-4 py-2 text-xs font-semibold text-white"
+              className="rounded-lg bg-[#6d28d9] px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Save attendance
+              {isSaving ? "Saving…" : "Save attendance"}
             </button>
           </div>
         </footer>
@@ -2027,6 +2367,9 @@ function EmployeeDetails({
   employee,
   state,
   updateState,
+  canManage,
+  canReadAdvances,
+  onEmployeeUpdated,
   onBack,
   onViewPayrollRun,
   onViewAdvance,
@@ -2034,6 +2377,9 @@ function EmployeeDetails({
   employee: Employee;
   state: ErpState;
   updateState: (next: ErpState) => void;
+  canManage: boolean;
+  canReadAdvances: boolean;
+  onEmployeeUpdated: (employee: Employee) => void;
   onBack: () => void;
   onViewPayrollRun: (id: string) => void;
   onViewAdvance: (id: string) => void;
@@ -2043,6 +2389,9 @@ function EmployeeDetails({
       employee={employee}
       state={state}
       updateState={updateState}
+      canManage={canManage}
+      canReadAdvances={canReadAdvances}
+      onEmployeeUpdated={onEmployeeUpdated}
       onBack={onBack}
       onViewPayrollRun={onViewPayrollRun}
       onViewAdvance={onViewAdvance}
@@ -2072,39 +2421,62 @@ const employeeRoles = [
   "Inventory Manager",
   "Production Manager",
 ];
-const employeeKpiDemo = {
-  total: 24,
-  departments: [
-    { name: "Sales", count: 7 },
-    { name: "HR", count: 4 },
-    { name: "Marketing", count: 3 },
-    { name: "Inventory", count: 5 },
-    { name: "Production", count: 5 },
-  ],
-  presentToday: 18,
-  scheduledToday: 21,
-  incomplete: 8,
-  missingFields: 5,
-  missingDocuments: 6,
-  onLeaveToday: 3,
-};
-
 function EmployeeDirectory({
   state,
   updateState,
+  loading,
+  loadError,
+  currentUser,
+  onRetry,
   onView,
+  onEmployeeCreated,
 }: {
   state: ErpState;
   updateState: (next: ErpState) => void;
+  loading: boolean;
+  loadError: string;
+  currentUser: UserAccount;
+  onRetry: () => void;
   onView: (id: string) => void;
+  onEmployeeCreated: (employee: Employee) => void;
 }) {
   const [showWizard, setShowWizard] = useState(false);
   const [resumeDraft, setResumeDraft] = useState<EmployeeDraft | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+  const [draftLoadError, setDraftLoadError] = useState("");
+  const [drafts, setDrafts] = useState<EmployeeDraft[]>([]);
   const [query, setQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("All departments");
   const [categoryFilter, setCategoryFilter] = useState("All categories");
   const [frequencyFilter, setFrequencyFilter] = useState("All frequencies");
   const [statusFilter, setStatusFilter] = useState("All statuses");
+  const canManage = currentUser.roles.some((role) =>
+    ["Super Admin", "Admin", "Human Resource"].includes(role),
+  );
+  const canRead = canManage || currentUser.roles.includes("General Manager");
+  const [legacyImport, setLegacyImport] = useState(() =>
+    getLegacyEmployeeImport(),
+  );
+  useEffect(() => {
+    if (!canManage) return;
+    let mounted = true;
+    listEmployeeDrafts()
+      .then(({ drafts }) => {
+        if (mounted) setDrafts(drafts as EmployeeDraft[]);
+      })
+      .catch((error: unknown) => {
+        if (mounted)
+          setDraftLoadError(
+            error instanceof ApiError
+              ? error.message
+              : "Could not load employee drafts.",
+          );
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [canManage]);
   const standardDepartments = [
     "Sales",
     "HR",
@@ -2149,19 +2521,119 @@ function EmployeeDirectory({
     setFrequencyFilter("All frequencies");
     setStatusFilter("All statuses");
   };
-  const discardDraft = (draft: EmployeeDraft) => {
+  const discardDraft = async (draft: EmployeeDraft) => {
     if (!window.confirm("Discard this employee draft? This cannot be undone."))
       return;
-    updateState({
-      ...state,
-      employeeDrafts: state.employeeDrafts.filter(
-        (item) => item.id !== draft.id,
-      ),
-    });
+    try {
+      await deleteEmployeeDraft(draft.id);
+      setDrafts((current) => current.filter((item) => item.id !== draft.id));
+    } catch (error) {
+      setImportMessage(
+        error instanceof ApiError
+          ? error.message
+          : "Could not discard this draft.",
+      );
+    }
   };
   const openDraft = (draft: EmployeeDraft) => {
     setResumeDraft(draft);
     setShowWizard(true);
+  };
+  const importLegacy = async () => {
+    if (!legacyImport || importing) return;
+    setImporting(true);
+    setImportMessage("");
+    try {
+      const source = legacyImport.employees.filter(
+        (employee) => employee.id && employee.number,
+      );
+      const importable = source.map((employee) => {
+        const {
+          id,
+          photoUrl: _photoUrl,
+          image: _image,
+          documents: _documents,
+          ...profile
+        } = employee;
+        return {
+          migrationKey: String(id)
+            .replace(/[^A-Za-z0-9_-]/g, "_")
+            .slice(0, 80),
+          employee: profile as Record<string, unknown>,
+        };
+      });
+      const result = {
+        imported: 0,
+        alreadyImported: 0,
+        failed: 0,
+        results: [] as Array<{
+          index: number;
+          migrationKey?: string;
+          status: string;
+          error?: string;
+          employeeId?: string;
+        }>,
+      };
+      for (let offset = 0; offset < importable.length; offset += 25) {
+        const batch = await importLocalEmployees(
+          importable.slice(offset, offset + 25),
+        );
+        result.imported += batch.imported;
+        result.alreadyImported += batch.alreadyImported;
+        result.failed += batch.failed;
+        result.results.push(
+          ...batch.results.map((item) => ({
+            ...item,
+            index: item.index + offset,
+          })),
+        );
+      }
+      const migratedDrafts: string[] = [];
+      for (const draft of legacyImport.employeeDrafts) {
+        try {
+          const {
+            id: _id,
+            number: _number,
+            image: _image,
+            photoUrl: _photoUrl,
+            documents: _documents,
+            ...draftEmployee
+          } = draft.employee;
+          await saveEmployeeDraft({ ...draft, employee: draftEmployee });
+          migratedDrafts.push(draft.id);
+        } catch {
+          // Keep the legacy migration bundle so this draft can be retried.
+        }
+      }
+      const refreshed = await listEmployees();
+      const refreshedDrafts = await listEmployeeDrafts();
+      updateState({ ...state, employees: refreshed.employees });
+      setDrafts(refreshedDrafts.drafts as EmployeeDraft[]);
+      if (
+        result.failed === 0 &&
+        migratedDrafts.length === legacyImport.employeeDrafts.length
+      ) {
+        clearLegacyEmployeeImport();
+        setLegacyImport(null);
+      }
+      const oldMediaCount = source.filter(
+        (employee) =>
+          employee.photoUrl ||
+          employee.image?.url ||
+          employee.documents?.length,
+      ).length;
+      setImportMessage(
+        `${result.imported} imported, ${result.alreadyImported} already imported, ${result.failed} failed.${oldMediaCount ? ` ${oldMediaCount} old profile(s) had media references that cannot be safely copied from browser storage; upload those files again on the profile.` : ""}${migratedDrafts.length < legacyImport.employeeDrafts.length ? " Some drafts could not migrate and are retained for retry." : ""}`,
+      );
+    } catch (error) {
+      setImportMessage(
+        error instanceof ApiError
+          ? error.message
+          : "Could not import local employee profiles.",
+      );
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -2178,121 +2650,129 @@ function EmployeeDirectory({
             Employee records, employment terms, and profile documents.
           </p>
         </div>
+        {canManage && (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              setResumeDraft(null);
+              setShowWizard(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6]"
+          >
+            <Plus className="size-4" /> Add employee
+          </button>
+        )}
+      </div>
+      {!canRead && (
+        <p
+          role="alert"
+          className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          Your account does not have permission to view employee profiles.
+        </p>
+      )}
+      {loading && (
+        <p
+          role="status"
+          className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500"
+        >
+          Loading employee profiles…
+        </p>
+      )}
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+        >
+          {loadError}
+        </div>
+      )}
+      {loadError && (
         <button
           type="button"
-          onClick={() => {
-            setResumeDraft(null);
-            setShowWizard(true);
-          }}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6]"
+          onClick={onRetry}
+          className="mb-4 text-xs font-semibold text-rose-700 underline"
         >
-          <Plus className="size-4" /> Add employee
+          Retry loading employee profiles
         </button>
-      </div>
+      )}
+      {canManage && legacyImport && (
+        <section className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-4">
+          <h3 className="text-sm font-bold text-sky-950">
+            Local employee records found
+          </h3>
+          <p className="mt-1 text-xs text-sky-900">
+            Import {legacyImport.employees.length} browser-saved employee
+            profile(s) and {legacyImport.employeeDrafts.length} draft(s) into
+            the server. Seeded demo employees are excluded. Existing local
+            images/documents cannot be copied unless you upload the original
+            files again.
+          </p>
+          <button
+            type="button"
+            disabled={importing || loading}
+            onClick={importLegacy}
+            className="mt-3 rounded-lg bg-sky-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {importing ? "Importing…" : "Import local employee data"}
+          </button>
+        </section>
+      )}
+      {importMessage && (
+        <p
+          role="status"
+          className="mb-4 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-950"
+        >
+          {importMessage}
+        </p>
+      )}
+      {draftLoadError && (
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800"
+        >
+          {draftLoadError}
+        </p>
+      )}
       <section
-        aria-label="Employee workforce KPIs"
-        className="mb-4 grid gap-3 sm:grid-cols-2 2xl:grid-cols-4"
+        aria-label="Employee workforce totals"
+        className="mb-4 grid gap-3 sm:grid-cols-3"
       >
         <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-slate-600">
-              Total employees
-            </h3>
-            <span className="rounded bg-slate-100 px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">
-              Demo data
-            </span>
-          </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-            {employeeKpiDemo.total}
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-[11px]">
-            {employeeKpiDemo.departments.map((department) => (
-              <div key={department.name} className="flex justify-between gap-2">
-                <span className="text-slate-500">{department.name}</span>
-                <span className="font-semibold text-slate-700">
-                  {department.count}
-                </span>
-              </div>
-            ))}
+          <h3 className="text-xs font-semibold text-slate-600">
+            Total profiles
+          </h3>
+          <div className="mt-2 text-2xl font-bold">
+            {loading ? "—" : state.employees.length}
           </div>
         </article>
         <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-slate-600">
-              Present today
-            </h3>
-            <span className="rounded bg-slate-100 px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">
-              Demo data
-            </span>
+          <h3 className="text-xs font-semibold text-slate-600">
+            Active employees
+          </h3>
+          <div className="mt-2 text-2xl font-bold">
+            {loading
+              ? "—"
+              : state.employees.filter(
+                  (employee) => employee.status === "Active",
+                ).length}
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold tracking-tight text-slate-900">
-              {employeeKpiDemo.presentToday}
-            </span>
-            <span className="text-xs text-slate-500">
-              of {employeeKpiDemo.scheduledToday} scheduled
-            </span>
-          </div>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-emerald-500"
-              style={{
-                width: `${Math.round((employeeKpiDemo.presentToday / employeeKpiDemo.scheduledToday) * 100)}%`,
-              }}
-            />
-          </div>
-          <p className="mt-2 text-[10px] text-slate-400">
-            Mock attendance snapshot
-          </p>
         </article>
         <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-slate-600">
-              Incomplete records
-            </h3>
-            <span className="rounded bg-slate-100 px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">
-              Demo data
-            </span>
+          <h3 className="text-xs font-semibold text-slate-600">
+            Inactive employees
+          </h3>
+          <div className="mt-2 text-2xl font-bold">
+            {loading
+              ? "—"
+              : state.employees.filter(
+                  (employee) => employee.status === "Inactive",
+                ).length}
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-            {employeeKpiDemo.incomplete}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500">
-            Employees missing required information
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-            <span className="rounded bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
-              {employeeKpiDemo.missingFields} missing fields
-            </span>
-            <span className="rounded bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-700">
-              {employeeKpiDemo.missingDocuments} missing documents
-            </span>
-          </div>
-          <p className="mt-2 text-[9px] text-slate-400">
-            Fields and documents can overlap.
-          </p>
-        </article>
-        <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-slate-600">
-              Employees on leave
-            </h3>
-            <span className="rounded bg-slate-100 px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">
-              Demo data
-            </span>
-          </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-            {employeeKpiDemo.onLeaveToday}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500">
-            On approved leave today
-          </p>
-          <p className="mt-3 border-t border-slate-100 pt-3 text-[10px] text-slate-400">
-            Disciplinary letters are managed separately.
-          </p>
         </article>
       </section>
-      {state.employeeDrafts.length > 0 && (
+      {drafts.length > 0 && (
         <section className="mb-4 overflow-hidden rounded-xl border border-amber-200 bg-white">
           <div className="border-b border-amber-100 px-4 py-3">
             <h3 className="text-sm font-bold">Employee drafts</h3>
@@ -2302,7 +2782,7 @@ function EmployeeDirectory({
             </p>
           </div>
           <div className="divide-y divide-slate-100">
-            {state.employeeDrafts.map((draft) => (
+            {drafts.map((draft) => (
               <div
                 key={draft.id}
                 className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
@@ -2319,6 +2799,7 @@ function EmployeeDirectory({
                 <div className="flex gap-2">
                   <button
                     type="button"
+                    disabled={loading}
                     onClick={() => openDraft(draft)}
                     className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                   >
@@ -2337,157 +2818,181 @@ function EmployeeDirectory({
           </div>
         </section>
       )}
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-100 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-sm font-bold">Employees</h3>
-              <p className="mt-1 text-xs text-slate-400">
-                Showing {visibleEmployees.length} of {state.employees.length}{" "}
-                records
-              </p>
+      {!loading && !loadError && canRead && (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-sm font-bold">Employees</h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Showing {visibleEmployees.length} of {state.employees.length}{" "}
+                  records
+                </p>
+              </div>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <Search className="size-4 text-slate-400" />
+                <input
+                  aria-label="Search employees"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="w-full bg-transparent text-xs outline-none placeholder:text-slate-400 sm:w-64"
+                  placeholder="Search name, number, department"
+                />
+              </label>
             </div>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <Search className="size-4 text-slate-400" />
-              <input
-                aria-label="Search employees"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="w-full bg-transparent text-xs outline-none placeholder:text-slate-400 sm:w-64"
-                placeholder="Search name, number, department"
-              />
-            </label>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <select
-              aria-label="Filter employees by department"
-              value={departmentFilter}
-              onChange={(event) => setDepartmentFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
-            >
-              <option>All departments</option>
-              {departments.map((department) => (
-                <option key={department}>{department}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Filter employees by category"
-              value={categoryFilter}
-              onChange={(event) => setCategoryFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
-            >
-              <option>All categories</option>
-              <option>Staff</option>
-              <option>Casual</option>
-              <option value="Other">Others</option>
-            </select>
-            <select
-              aria-label="Filter employees by payment frequency"
-              value={frequencyFilter}
-              onChange={(event) => setFrequencyFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
-            >
-              <option>All frequencies</option>
-              <option>Monthly</option>
-              <option>Weekly</option>
-              <option value="Not set">Frequency not set</option>
-            </select>
-            <select
-              aria-label="Filter employees by status"
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
-            >
-              <option>All statuses</option>
-              <option>Active</option>
-              <option>Inactive</option>
-            </select>
-            <button
-              type="button"
-              onClick={resetFilters}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
-            >
-              <Icons.RotateCcw className="size-3.5" /> Reset filters
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400">
-              <tr>
-                {[
-                  "Employee",
-                  "Department",
-                  "Role",
-                  "Category",
-                  "Pay type",
-                  "Frequency",
-                  "Salary / wage",
-                  "Status",
-                ].map((heading) => (
-                  <th key={heading} className="px-4 py-3">
-                    {heading}
-                  </th>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <select
+                aria-label="Filter employees by department"
+                value={departmentFilter}
+                onChange={(event) => setDepartmentFilter(event.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              >
+                <option>All departments</option>
+                {departments.map((department) => (
+                  <option key={department}>{department}</option>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleEmployees.map((employee) => (
-                <tr
-                  key={employee.id}
-                  className="border-t border-slate-100 text-slate-600 hover:bg-slate-50/70"
-                >
-                  <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => onView(employee.id)}
-                      className="flex items-center gap-3 text-left"
-                    >
-                      <EmployeeAvatar employee={employee} size="sm" />
-                      <span className="font-semibold text-slate-800 hover:text-[#6d28d9]">
-                        {employeeDisplayName(employee)}
-                        <span className="mt-1 block font-mono text-[10px] font-normal text-slate-400">
-                          {employee.number}
-                        </span>
-                      </span>
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">{employee.department}</td>
-                  <td className="px-4 py-3">{employee.role}</td>
-                  <td className="px-4 py-3">{employee.category}</td>
-                  <td className="px-4 py-3">
-                    {employee.compensationType ?? "Not set"}
-                  </td>
-                  <td className="px-4 py-3">
-                    {employee.paymentFrequency ?? "Not set"}
-                  </td>
-                  <td className="px-4 py-3 font-semibold text-slate-700">
-                    {money(employee.salary)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Status text={employee.status} />
-                  </td>
-                </tr>
-              ))}
-              {visibleEmployees.length === 0 && (
+              </select>
+              <select
+                aria-label="Filter employees by category"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              >
+                <option>All categories</option>
+                <option>Staff</option>
+                <option>Casual</option>
+                <option value="Other">Others</option>
+              </select>
+              <select
+                aria-label="Filter employees by payment frequency"
+                value={frequencyFilter}
+                onChange={(event) => setFrequencyFilter(event.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              >
+                <option>All frequencies</option>
+                <option>Monthly</option>
+                <option>Weekly</option>
+                <option value="Not set">Frequency not set</option>
+              </select>
+              <select
+                aria-label="Filter employees by status"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              >
+                <option>All statuses</option>
+                <option>Active</option>
+                <option>Inactive</option>
+              </select>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                <Icons.RotateCcw className="size-3.5" /> Reset filters
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400">
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="px-4 py-10 text-center text-slate-400"
-                  >
-                    No employees match those search terms and filters.
-                  </td>
+                  {(canManage
+                    ? [
+                        "Employee",
+                        "Department",
+                        "Role",
+                        "Category",
+                        "Pay type",
+                        "Frequency",
+                        "Salary / wage",
+                        "Status",
+                      ]
+                    : ["Employee", "Department", "Role", "Category", "Status"]
+                  ).map((heading) => (
+                    <th key={heading} className="px-4 py-3">
+                      {heading}
+                    </th>
+                  ))}
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      {showWizard && (
+              </thead>
+              <tbody>
+                {visibleEmployees.map((employee) => (
+                  <tr
+                    key={employee.id}
+                    className="border-t border-slate-100 text-slate-600 hover:bg-slate-50/70"
+                  >
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => onView(employee.id)}
+                        className="flex items-center gap-3 text-left"
+                      >
+                        <EmployeeAvatar employee={employee} size="sm" />
+                        <span className="font-semibold text-slate-800 hover:text-[#6d28d9]">
+                          {employeeDisplayName(employee)}
+                          <span className="mt-1 block font-mono text-[10px] font-normal text-slate-400">
+                            {employee.number}
+                          </span>
+                        </span>
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">{employee.department}</td>
+                    <td className="px-4 py-3">{employee.role}</td>
+                    <td className="px-4 py-3">{employee.category}</td>
+                    {canManage && (
+                      <td className="px-4 py-3">
+                        {employee.compensationType ?? "Not set"}
+                      </td>
+                    )}
+                    {canManage && (
+                      <td className="px-4 py-3">
+                        {employee.paymentFrequency ?? "Not set"}
+                      </td>
+                    )}
+                    {canManage && (
+                      <td className="px-4 py-3 font-semibold text-slate-700">
+                        {money(employee.salary)}
+                      </td>
+                    )}
+                    <td className="px-4 py-3">
+                      <Status text={employee.status} />
+                    </td>
+                  </tr>
+                ))}
+                {visibleEmployees.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={canManage ? 8 : 5}
+                      className="px-4 py-10 text-center text-slate-400"
+                    >
+                      No employees match those search terms and filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {showWizard && canManage && (
         <EmployeeWizard
           state={state}
           updateState={updateState}
           draft={resumeDraft}
+          onEmployeeSaved={(employee) => {
+            onEmployeeCreated(employee);
+            if (resumeDraft)
+              setDrafts((current) =>
+                current.filter((item) => item.id !== resumeDraft.id),
+              );
+          }}
+          onDraftSaved={(draft) =>
+            setDrafts((current) => [
+              draft,
+              ...current.filter((item) => item.id !== draft.id),
+            ])
+          }
           onClose={() => {
             setShowWizard(false);
             setResumeDraft(null);
@@ -2526,12 +3031,16 @@ function EmployeeWizard({
   updateState,
   draft,
   employee,
+  onEmployeeSaved,
+  onDraftSaved,
   onClose,
 }: {
   state: ErpState;
   updateState: (next: ErpState) => void;
   draft: EmployeeDraft | null;
   employee?: Employee;
+  onEmployeeSaved: (employee: Employee) => void;
+  onDraftSaved: (draft: EmployeeDraft) => void;
   onClose: () => void;
 }) {
   const [step, setStep] = useState(draft?.currentStep ?? 0);
@@ -2539,9 +3048,14 @@ function EmployeeWizard({
     draft?.employee ?? employee ?? {},
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [documentFiles, setDocumentFiles] = useState<
+    Record<string, File | null>
+  >({});
   const [documentNames, setDocumentNames] = useState<Record<string, string[]>>(
     {},
   );
+  const [createdEmployee, setCreatedEmployee] = useState<Employee | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const keepLegacyName = Boolean(
     employee?.name &&
@@ -2705,35 +3219,56 @@ function EmployeeWizard({
       return "Complete category, department, role, pay type, salary/wage, and payment frequency.";
     return "";
   };
-  const persistDraft = () => {
+  const persistDraft = async () => {
     const id = draft?.id ?? createId("EDRAFT");
+    const {
+      id: _employeeId,
+      number: _employeeNumber,
+      image: _image,
+      photoUrl: _photoUrl,
+      documents: _documents,
+      ...draftEmployee
+    } = values;
     const nextDraft: EmployeeDraft = {
       id,
-      employee: values,
+      employee: draftEmployee,
       currentStep: step,
       updatedAt: new Date().toISOString(),
     };
-    updateState({
-      ...state,
-      employeeDrafts: [
-        nextDraft,
-        ...state.employeeDrafts.filter((item) => item.id !== id),
-      ],
-    });
-    onClose();
+    setSaving(true);
+    try {
+      const result = await saveEmployeeDraft(nextDraft);
+      const savedDraft = result.draft;
+      updateState({
+        ...state,
+        employeeDrafts: [
+          { ...savedDraft, employee: savedDraft.employee as Partial<Employee> },
+          ...state.employeeDrafts.filter((item) => item.id !== id),
+        ],
+      });
+      onDraftSaved(savedDraft as EmployeeDraft);
+      onClose();
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "Could not save this employee draft.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
-  const finish = () => {
+  const finish = async () => {
     const validation = validateStep();
     if (validation) {
       setError(validation);
       return;
     }
     const name = employeeDisplayName(values);
-    const completed: Employee = {
-      ...(employee ?? ({} as Employee)),
+    const effectiveEmployee = createdEmployee ?? employee;
+    const completed: Partial<Employee> = {
+      ...(effectiveEmployee ?? {}),
       ...values,
-      id: employee?.id ?? createId("E"),
-      number: employee?.number ?? createId("EMP"),
       name,
       firstName: values.firstName?.trim(),
       secondName: values.secondName?.trim(),
@@ -2747,23 +3282,93 @@ function EmployeeWizard({
       paymentFrequency: values.paymentFrequency as Employee["paymentFrequency"],
       nssfApplies: Boolean(values.nssfApplies),
       taxApplies: Boolean(values.taxApplies),
-      documents: employee?.documents ?? [],
+      documents: effectiveEmployee?.documents ?? [],
       mother: values.mother ?? { name: "", phone: "", address: "", status: "" },
       father: values.father ?? { name: "", phone: "", address: "", status: "" },
     };
-    const employees = employee
-      ? state.employees.map((item) =>
-          item.id === employee.id ? completed : item,
-        )
-      : [completed, ...state.employees];
-    updateState({
-      ...state,
-      employees,
-      employeeDrafts: state.employeeDrafts.filter(
-        (item) => item.id !== draft?.id,
-      ),
-    });
-    onClose();
+    const {
+      id: _id,
+      number: _number,
+      documents: _documents,
+      image: _image,
+      photoUrl: _photoUrl,
+      ...profile
+    } = completed;
+    setSaving(true);
+    let persistedEmployee = effectiveEmployee;
+    try {
+      let savedEmployee = effectiveEmployee
+        ? await updateEmployeeApi(effectiveEmployee.id, profile)
+        : await createEmployeeApi({
+            ...profile,
+            name,
+            category: completed.category ?? "Staff employee",
+            department: completed.department ?? "",
+            role: completed.role ?? "",
+            status: completed.status ?? "Active",
+            salary: Number(completed.salary) || 0,
+          });
+      persistedEmployee = savedEmployee;
+      if (!effectiveEmployee) setCreatedEmployee(savedEmployee);
+      if (photoFile) {
+        const result = await uploadEmployeeImage(savedEmployee.id, photoFile);
+        savedEmployee = {
+          ...savedEmployee,
+          image: result.image,
+          photoUrl: result.image.url,
+        };
+        persistedEmployee = savedEmployee;
+        setPhotoFile(null);
+      }
+      for (const [title, file] of Object.entries(documentFiles)) {
+        if (!file) continue;
+        const result = await uploadEmployeeDocument(
+          savedEmployee.id,
+          title,
+          file,
+        );
+        savedEmployee = {
+          ...savedEmployee,
+          documents: [...(savedEmployee.documents ?? []), result.document],
+        };
+        persistedEmployee = savedEmployee;
+        setDocumentFiles((current) => ({ ...current, [title]: null }));
+      }
+      updateState({
+        ...state,
+        employees: effectiveEmployee
+          ? state.employees.map((item) =>
+              item.id === savedEmployee.id ? savedEmployee : item,
+            )
+          : [savedEmployee, ...state.employees],
+        employeeDrafts: state.employeeDrafts.filter(
+          (item) => item.id !== draft?.id,
+        ),
+      });
+      onEmployeeSaved(savedEmployee);
+      onClose();
+    } catch (cause) {
+      if (persistedEmployee) {
+        setCreatedEmployee(persistedEmployee);
+        updateState({
+          ...state,
+          employees: [
+            persistedEmployee,
+            ...state.employees.filter(
+              (item) => item.id !== persistedEmployee?.id,
+            ),
+          ],
+        });
+        onEmployeeSaved(persistedEmployee);
+      }
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "The employee profile could not be saved. Check the server connection and try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
   const nextStep = () => {
     const validation = validateStep();
@@ -2782,10 +3387,10 @@ function EmployeeWizard({
     )
       onClose();
   };
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (step < employeeWizardSteps.length - 1) nextStep();
-    else finish();
+    else await finish();
   };
 
   return (
@@ -2898,7 +3503,7 @@ function EmployeeWizard({
                     <div>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/png,image/jpeg,image/webp"
                         aria-label="Choose employee photo"
                         onChange={(event) =>
                           setPhotoFile(event.target.files?.[0] ?? null)
@@ -2906,8 +3511,7 @@ function EmployeeWizard({
                         className="block max-w-full text-xs text-slate-500 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-slate-700"
                       />
                       <p className="mt-1 text-[10px] text-slate-400">
-                        Preview only. Photo upload and storage will be connected
-                        later.
+                        PNG, JPEG, or WebP image; up to 5 MB.
                       </p>
                     </div>
                   </div>
@@ -3079,8 +3683,8 @@ function EmployeeWizard({
             <div>
               <h3 className="mb-1 text-sm font-bold">Documents & review</h3>
               <p className="mb-4 text-xs text-slate-500">
-                Choose files to preview their names. Upload and URL generation
-                will be added with the backend integration.
+                Upload PDF files to secure employee storage. Maximum file size
+                is 10 MB per document.
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {["CV", "LC letter", "Cover letter", "Police letter", "ID"].map(
@@ -3094,12 +3698,17 @@ function EmployeeWizard({
                         type="file"
                         aria-label={`Select ${title}`}
                         onChange={(event) =>
-                          setDocumentNames((current) => ({
-                            ...current,
-                            [title]: Array.from(event.target.files ?? []).map(
-                              (file) => file.name,
-                            ),
-                          }))
+                          (() => {
+                            const file = event.target.files?.[0] ?? null;
+                            setDocumentFiles((current) => ({
+                              ...current,
+                              [title]: file,
+                            }));
+                            setDocumentNames((current) => ({
+                              ...current,
+                              [title]: file ? [file.name] : [],
+                            }));
+                          })()
                         }
                         className="mt-2 block w-full text-[11px] text-slate-500 file:mr-2 file:rounded-md file:border-0 file:bg-slate-100 file:px-2.5 file:py-1.5 file:text-[10px] file:font-semibold"
                       />
@@ -3108,7 +3717,7 @@ function EmployeeWizard({
                           key={name}
                           className="mt-2 block truncate text-[10px] font-normal text-emerald-700"
                         >
-                          Selected: {name} · not uploaded
+                          Selected: {name} · uploads on save
                         </span>
                       ))}
                     </label>
@@ -3163,6 +3772,7 @@ function EmployeeWizard({
               <button
                 type="button"
                 onClick={persistDraft}
+                disabled={saving}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
               >
                 Save draft
@@ -3181,13 +3791,16 @@ function EmployeeWizard({
               )}
               <button
                 type="submit"
+                disabled={saving}
                 className="rounded-lg bg-[#6d28d9] px-4 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6]"
               >
-                {step === employeeWizardSteps.length - 1
-                  ? employee
-                    ? "Save changes"
-                    : "Complete employee"
-                  : "Continue"}
+                {saving
+                  ? "Saving…"
+                  : step === employeeWizardSteps.length - 1
+                    ? (createdEmployee ?? employee)
+                      ? "Save changes"
+                      : "Complete employee"
+                    : "Continue"}
               </button>
             </div>
           </div>
@@ -3229,6 +3842,9 @@ function EmployeeProfile({
   employee,
   state,
   updateState,
+  canManage,
+  canReadAdvances,
+  onEmployeeUpdated,
   onBack,
   onViewPayrollRun,
   onViewAdvance,
@@ -3236,6 +3852,9 @@ function EmployeeProfile({
   employee: Employee;
   state: ErpState;
   updateState: (next: ErpState) => void;
+  canManage: boolean;
+  canReadAdvances: boolean;
+  onEmployeeUpdated: (employee: Employee) => void;
   onBack: () => void;
   onViewPayrollRun: (id: string) => void;
   onViewAdvance: (id: string) => void;
@@ -3250,7 +3869,21 @@ function EmployeeProfile({
   const [attendanceMonth, setAttendanceMonth] = useState(() =>
     companyWorkDate().slice(0, 7),
   );
+  const employeeAttendanceQuery = useAttendanceMonth(
+    attendanceMonth,
+    employee.id,
+    activeTab === "attendance",
+  );
+  const employeeSalaryAdvancesQuery = useSalaryAdvances(
+    employee.id,
+    activeTab === "advances" && canReadAdvances,
+  );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [imageError, setImageError] = useState("");
+  const [documentError, setDocumentError] = useState("");
+  const [documentTitle, setDocumentTitle] = useState("");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentBusy, setDocumentBusy] = useState(false);
   const previewUrl = useMemo(
     () => (photoFile ? URL.createObjectURL(photoFile) : null),
     [photoFile],
@@ -3261,7 +3894,7 @@ function EmployeeProfile({
     },
     [previewUrl],
   );
-  const tabs: { id: EmployeeProfileTab; label: string }[] = [
+  const allTabs: { id: EmployeeProfileTab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "personal", label: "Personal & family" },
     { id: "employment", label: "Employment & education" },
@@ -3272,7 +3905,125 @@ function EmployeeProfile({
     { id: "leave", label: "Leave history" },
     { id: "punishment", label: "Punishment history" },
   ];
+  const tabs = canManage
+    ? allTabs
+    : allTabs.filter((tab) => tab.id === "overview");
   const displayName = employeeDisplayName(employee);
+  const saveProfileImage = async (file: File) => {
+    setImageError("");
+    setPhotoFile(file);
+    try {
+      const { image } = await uploadEmployeeImage(employee.id, file);
+      onEmployeeUpdated({ ...employee, image, photoUrl: image.url });
+      setPhotoFile(null);
+    } catch (error) {
+      setImageError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not upload the employee image.",
+      );
+    }
+  };
+  const deleteProfileImage = async () => {
+    setImageError("");
+    try {
+      const { image } = await removeEmployeeImage(employee.id);
+      onEmployeeUpdated({ ...employee, image, photoUrl: "" });
+    } catch (error) {
+      setImageError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not remove the employee image.",
+      );
+    }
+  };
+  const addDocument = async () => {
+    if (!documentFile || !documentTitle.trim()) {
+      setDocumentError("Choose a PDF and enter a document title.");
+      return;
+    }
+    setDocumentBusy(true);
+    setDocumentError("");
+    try {
+      const { document } = await uploadEmployeeDocument(
+        employee.id,
+        documentTitle.trim(),
+        documentFile,
+      );
+      onEmployeeUpdated({
+        ...employee,
+        documents: [...(employee.documents ?? []), document],
+      });
+      setDocumentFile(null);
+      setDocumentTitle("");
+    } catch (error) {
+      setDocumentError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not upload the document.",
+      );
+    } finally {
+      setDocumentBusy(false);
+    }
+  };
+  const deleteDocument = async (documentId?: string) => {
+    if (!documentId) return;
+    setDocumentError("");
+    try {
+      await removeEmployeeDocument(employee.id, documentId);
+      onEmployeeUpdated({
+        ...employee,
+        documents: (employee.documents ?? []).filter(
+          (item) => item.id !== documentId,
+        ),
+      });
+    } catch (error) {
+      setDocumentError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not remove the document.",
+      );
+    }
+  };
+  const downloadDocument = async (documentId?: string) => {
+    if (!documentId) return;
+    setDocumentError("");
+    try {
+      const { url } = await getEmployeeDocumentDownload(
+        employee.id,
+        documentId,
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.click();
+    } catch (error) {
+      setDocumentError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not generate a secure document link.",
+      );
+    }
+  };
+  const deactivateProfile = async () => {
+    if (
+      !window.confirm(
+        `Deactivate ${displayName}? The employee record and history will be retained.`,
+      )
+    )
+      return;
+    try {
+      const updated = await deactivateEmployeeApi(employee.id);
+      onEmployeeUpdated(updated);
+    } catch (error) {
+      setImageError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not deactivate this employee.",
+      );
+    }
+  };
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
@@ -3312,13 +4063,9 @@ function EmployeeProfile({
       </p>
     </section>
   );
-  const employeeAttendance = state.attendanceRecords
-    .filter(
-      (record) =>
-        record.employeeId === employee.id &&
-        record.workDate.startsWith(`${attendanceMonth}-`),
-    )
-    .sort((left, right) => right.workDate.localeCompare(left.workDate));
+  const employeeAttendance = [
+    ...(employeeAttendanceQuery.data?.records ?? []),
+  ].sort((left, right) => right.workDate.localeCompare(left.workDate));
   const attendanceMonthStart = new Date(`${attendanceMonth}-01T12:00:00+03:00`);
   const attendanceMonthDays = new Date(
     Date.UTC(
@@ -3399,7 +4146,8 @@ function EmployeeProfile({
               {field("Department", employee.department)}
               {field("Primary role", employee.role)}
               {field("Employment status", employee.status)}
-              {field("Payment frequency", employee.paymentFrequency)}
+              {canManage &&
+                field("Payment frequency", employee.paymentFrequency)}
             </div>
           </section>
           <section className="rounded-xl border border-slate-200 bg-white p-5">
@@ -3412,37 +4160,40 @@ function EmployeeProfile({
               {field("Current address", employee.currentAddress)}
             </div>
           </section>
-          <section className="rounded-xl border border-slate-200 bg-white p-5 lg:col-span-2">
-            <h3 className="text-sm font-bold">Record completion</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Profile image and document uploads are not connected yet.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {[
-                [
-                  "Personal details",
-                  Boolean(employee.firstName && employee.secondName),
-                ],
-                [
-                  "Employment details",
-                  Boolean(employee.department && employee.role),
-                ],
-                ["NSSF number", Boolean(employee.nssfNumber)],
-                ["TIN", Boolean(employee.tinNumber)],
-                ["Documents", Boolean(employee.documents?.length)],
-              ].map(([label, complete]) => (
-                <span
-                  key={String(label)}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-semibold ${complete ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
-                >
+          {canManage && (
+            <section className="rounded-xl border border-slate-200 bg-white p-5 lg:col-span-2">
+              <h3 className="text-sm font-bold">Record completion</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Profile image and document files are stored in the employee
+                profile.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {[
+                  [
+                    "Personal details",
+                    Boolean(employee.firstName && employee.secondName),
+                  ],
+                  [
+                    "Employment details",
+                    Boolean(employee.department && employee.role),
+                  ],
+                  ["NSSF number", Boolean(employee.nssfNumber)],
+                  ["TIN", Boolean(employee.tinNumber)],
+                  ["Documents", Boolean(employee.documents?.length)],
+                ].map(([label, complete]) => (
                   <span
-                    className={`size-1.5 rounded-full ${complete ? "bg-emerald-500" : "bg-slate-400"}`}
-                  />
-                  {label}: {complete ? "Complete" : "Not added"}
-                </span>
-              ))}
-            </div>
-          </section>
+                    key={String(label)}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10px] font-semibold ${complete ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
+                  >
+                    <span
+                      className={`size-1.5 rounded-full ${complete ? "bg-emerald-500" : "bg-slate-400"}`}
+                    />
+                    {label}: {complete ? "Complete" : "Not added"}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       );
     if (activeTab === "personal")
@@ -3562,9 +4313,50 @@ function EmployeeProfile({
           <div className="border-b border-slate-100 px-5 py-4">
             <h3 className="text-sm font-bold">Employee documents</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Files are not uploaded or stored in this UI-only phase.
+              PDFs are uploaded to protected employee document storage.
             </p>
           </div>
+          {canManage && (
+            <div className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-[1fr_1fr_auto]">
+              <label className="text-xs font-semibold text-slate-600">
+                Document title
+                <input
+                  value={documentTitle}
+                  onChange={(event) => setDocumentTitle(event.target.value)}
+                  maxLength={80}
+                  className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-xs font-normal"
+                  placeholder="e.g. CV, National ID"
+                />
+              </label>
+              <label className="text-xs font-semibold text-slate-600">
+                PDF document
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(event) =>
+                    setDocumentFile(event.target.files?.[0] ?? null)
+                  }
+                  className="mt-2 block w-full text-xs font-normal"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={documentBusy}
+                onClick={addDocument}
+                className="self-end rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+              >
+                {documentBusy ? "Uploading…" : "Upload PDF"}
+              </button>
+            </div>
+          )}
+          {documentError && (
+            <p
+              role="alert"
+              className="mx-4 mt-3 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700"
+            >
+              {documentError}
+            </p>
+          )}
           {employee.documents?.length ? (
             <div className="divide-y divide-slate-100">
               {employee.documents.map((document, index) => (
@@ -3579,36 +4371,34 @@ function EmployeeProfile({
                         {document.title}
                       </div>
                       <div className="truncate text-[10px] text-slate-400">
-                        {document.publicId}
+                        {document.fileName || "PDF document"}
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <a
-                      aria-disabled={!document.url}
-                      href={document.url || undefined}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`rounded-md border px-2.5 py-1.5 text-[10px] font-semibold ${document.url ? "border-slate-200 text-slate-700" : "pointer-events-none border-slate-100 text-slate-300"}`}
+                    <button
+                      type="button"
+                      onClick={() => downloadDocument(document.id)}
+                      className="rounded-md border border-slate-200 px-2.5 py-1.5 text-[10px] font-semibold text-slate-700"
                     >
-                      View
-                    </a>
-                    <a
-                      aria-disabled={!document.download_Url}
-                      href={document.download_Url || undefined}
-                      download
-                      className={`rounded-md border px-2.5 py-1.5 text-[10px] font-semibold ${document.download_Url ? "border-slate-200 text-slate-700" : "pointer-events-none border-slate-100 text-slate-300"}`}
-                    >
-                      Download
-                    </a>
+                      Open / download
+                    </button>
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={() => deleteDocument(document.id)}
+                        className="rounded-md border border-rose-100 px-2.5 py-1.5 text-[10px] font-semibold text-rose-700"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           ) : (
             <p className="px-5 py-12 text-center text-xs text-slate-400">
-              No uploaded documents. Connect document upload to add CV, LC
-              letter, cover letter, police letter, or ID.
+              No employee documents have been uploaded.
             </p>
           )}
         </section>
@@ -3669,7 +4459,32 @@ function EmployeeProfile({
               </div>
             </div>
           </div>
-          {attendanceView === "calendar" ? (
+          {employeeAttendanceQuery.isLoading ? (
+            <p
+              role="status"
+              className="px-5 py-12 text-center text-xs text-slate-400"
+            >
+              Loading employee attendance…
+            </p>
+          ) : employeeAttendanceQuery.isError ? (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center justify-center gap-3 px-5 py-12 text-xs text-rose-700"
+            >
+              <span>
+                {employeeAttendanceQuery.error instanceof ApiError
+                  ? employeeAttendanceQuery.error.message
+                  : "Could not load employee attendance."}
+              </span>
+              <button
+                type="button"
+                onClick={() => void employeeAttendanceQuery.refetch()}
+                className="font-semibold underline"
+              >
+                Try again
+              </button>
+            </div>
+          ) : attendanceView === "calendar" ? (
             <div className="p-4">
               <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
                 {[
@@ -3979,9 +4794,9 @@ function EmployeeProfile({
       );
     }
     if (activeTab === "advances") {
-      const employeeAdvances = state.salaryAdvances
-        .filter((advance) => advance.employeeId === employee.id)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      const employeeAdvances = (
+        employeeSalaryAdvancesQuery.data?.advances ?? []
+      ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
       const amountRepaid = (advance: ErpState["salaryAdvances"][number]) =>
         advance.repayments.reduce(
           (total, repayment) => total + repayment.amount,
@@ -4001,7 +4816,28 @@ function EmployeeProfile({
               this employee.
             </p>
           </div>
-          {employeeAdvances.length ? (
+          {!canReadAdvances ? (
+            <p role="alert" className="p-5 text-sm text-rose-700">
+              You do not have permission to view salary advances.
+            </p>
+          ) : employeeSalaryAdvancesQuery.isLoading ? (
+            <p role="status" className="p-5 text-sm text-slate-500">
+              Loading salary advances…
+            </p>
+          ) : employeeSalaryAdvancesQuery.isError ? (
+            <div role="alert" className="p-5 text-sm text-rose-700">
+              {employeeSalaryAdvancesQuery.error instanceof Error
+                ? employeeSalaryAdvancesQuery.error.message
+                : "Could not load salary advances."}
+              <button
+                type="button"
+                onClick={() => employeeSalaryAdvancesQuery.refetch()}
+                className="ml-2 font-semibold underline"
+              >
+                Try again
+              </button>
+            </div>
+          ) : employeeAdvances.length ? (
             <div className="overflow-x-auto">
               <table className="w-full min-w-190 text-left text-xs">
                 <thead className="bg-slate-50 text-[10px] uppercase text-slate-400">
@@ -4162,21 +4998,24 @@ function EmployeeProfile({
               previewUrl ? { ...employee, photoUrl: previewUrl } : employee
             }
           />
-          <label
-            className="absolute -bottom-1 -right-1 grid size-7 cursor-pointer place-items-center rounded-full border-2 border-white bg-slate-100 text-slate-600 hover:bg-slate-200"
-            title="Choose a temporary photo preview"
-          >
-            <Icons.Camera className="size-3.5" />
-            <input
-              type="file"
-              accept="image/*"
-              aria-label="Update employee photo preview"
-              onChange={(event) =>
-                setPhotoFile(event.target.files?.[0] ?? null)
-              }
-              className="sr-only"
-            />
-          </label>
+          {canManage && (
+            <label
+              className="absolute -bottom-1 -right-1 grid size-7 cursor-pointer place-items-center rounded-full border-2 border-white bg-slate-100 text-slate-600 hover:bg-slate-200"
+              title="Upload or replace profile image"
+            >
+              <Icons.Camera className="size-3.5" />
+              <input
+                type="file"
+                accept="image/*"
+                aria-label="Update employee photo preview"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void saveProfileImage(file);
+                }}
+                className="sr-only"
+              />
+            </label>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-xs text-slate-400">
@@ -4194,17 +5033,49 @@ function EmployeeProfile({
             <Status text={employee.status} />
           </div>
           <p className="mt-2 text-[10px] text-slate-400">
-            Photo preview only; upload storage is not connected.
+            {canManage
+              ? "PNG, JPEG, or WebP · maximum 5 MB."
+              : "Employee profile image."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowEdit(true)}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          <Icons.PencilLine className="size-3.5" /> Edit profile
-        </button>
+        {canManage && (
+          <div className="flex flex-wrap gap-2">
+            {employee.photoUrl && (
+              <button
+                type="button"
+                onClick={deleteProfileImage}
+                className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+              >
+                Remove image
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowEdit(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Icons.PencilLine className="size-3.5" /> Edit profile
+            </button>
+            {employee.status === "Active" && (
+              <button
+                type="button"
+                onClick={deactivateProfile}
+                className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+              >
+                Deactivate
+              </button>
+            )}
+          </div>
+        )}
       </header>
+      {imageError && (
+        <p
+          role="alert"
+          className="mb-3 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700"
+        >
+          {imageError}
+        </p>
+      )}
       <div
         role="tablist"
         aria-label={`${displayName} profile sections`}
@@ -4248,6 +5119,8 @@ function EmployeeProfile({
           updateState={updateState}
           draft={null}
           employee={employee}
+          onEmployeeSaved={onEmployeeUpdated}
+          onDraftSaved={() => {}}
           onClose={() => setShowEdit(false)}
         />
       )}
@@ -4324,14 +5197,12 @@ function AttendanceRecordDialog({
                 : "No"
               : "Not applicable",
           )}
-          {detail("Check-in", record.checkIn ?? "Not recorded")}
-          {detail("Check-out", record.checkOut ?? "Not recorded")}
           {detail("Note", record.note ?? "No note")}
           {detail("Last updated", new Date(record.updatedAt).toLocaleString())}
         </div>
         <footer className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
           <p className="text-[10px] text-slate-400">
-            Correction history is not available yet.
+            Attendance changes are recorded in the system audit log.
           </p>
           <button
             type="button"
@@ -5756,9 +6627,9 @@ function Header({
             <span>/</span>
             <span className="text-slate-600">{active}</span>
           </div>
-          <h1 className="mt-0.5 text-lg font-bold tracking-tight sm:text-xl">
+          {/* <h1 className="mt-0.5 text-lg font-bold tracking-tight sm:text-xl">
             {active}
-          </h1>
+          </h1> */}
         </div>
       </div>
       <div className="flex items-center gap-2 sm:gap-4">
@@ -6974,6 +7845,7 @@ function ModulePage({
   companyProfileEditable,
   onCompanyProfileSave,
   onCurrentSessionRevoked,
+  onViewSalaryAdvance,
   onView,
 }: {
   active: string;
@@ -6985,6 +7857,7 @@ function ModulePage({
   companyProfileEditable: boolean;
   onCompanyProfileSave: (profile: CompanyProfile) => void;
   onCurrentSessionRevoked: () => void;
+  onViewSalaryAdvance: (id: string) => void;
   onView: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -7084,7 +7957,14 @@ function ModulePage({
       />
     );
   if (active === "Approvals")
-    return <Approvals state={state} updateState={updateState} />;
+    return (
+      <Approvals
+        state={state}
+        updateState={updateState}
+        currentUser={currentUser}
+        onViewSalaryAdvance={onViewSalaryAdvance}
+      />
+    );
   const kind = active.split(" ")[0];
   const data =
     active === "Sales"

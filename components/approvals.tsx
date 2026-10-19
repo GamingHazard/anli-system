@@ -3,45 +3,52 @@
 import { useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import { decideLeaveRequest } from '@/lib/leave'
-import { decideExpense, decideSalaryAdvance, approvePayrollRun } from '@/lib/approvals'
-import { formatDate, money, type ErpState } from '@/lib/erp'
+import { decideExpense, approvePayrollRun } from '@/lib/approvals'
+import { formatDate, money, type AdvanceRepaymentFrequency, type ErpState, type SalaryAdvance } from '@/lib/erp'
+import { useGeneralManagerSalaryAdvanceDecision, useHrSalaryAdvanceDecision, useSalaryAdvances } from '@/lib/salary-advance-queries'
+import type { UserAccount } from '@/lib/user-api'
 
-type Props = { state: ErpState; updateState: (next: ErpState) => void }
+type Props = { state: ErpState; updateState: (next: ErpState) => void; currentUser: UserAccount; onViewSalaryAdvance: (id: string) => void }
 type Source = 'Leave' | 'Salary advance' | 'Payroll' | 'Expense'
 type ApprovalStatus = 'Awaiting review' | 'Approved' | 'Rejected'
-type ApprovalItem = { id: string; source: Source; reference: string; requester: string; submittedAt: string; summary: string; amount?: number; status: ApprovalStatus; detail: string; recordId: string; canApprove?: boolean }
+type ApprovalItem = { id: string; source: Source; reference: string; requester: string; submittedAt: string; summary: string; amount?: number; status: ApprovalStatus; detail: string; recordId: string; canApprove?: boolean; advance?: SalaryAdvance; approvalStage?: 'Human Resource' | 'General Manager' }
 type View = 'Needs review' | 'History'
 
-const approver = 'Sarah Namirembe'
 const inputClass = 'rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-primary focus:ring-2 focus:ring-ring/30'
 const statusTone: Record<ApprovalStatus, string> = { 'Awaiting review': 'bg-amber-50 text-amber-800', Approved: 'bg-emerald-50 text-emerald-700', Rejected: 'bg-rose-50 text-rose-700' }
 
-function approvalItems(state: ErpState): ApprovalItem[] {
+function approvalItems(state: ErpState, salaryAdvances: SalaryAdvance[]): ApprovalItem[] {
   const pending: ApprovalItem[] = [
     ...state.leaveRequests.filter((request) => request.status === 'Pending').map((request) => ({ id: `leave-${request.id}`, recordId: request.id, source: 'Leave' as const, reference: request.reference, requester: request.employeeName, submittedAt: request.requestedAt, summary: `${request.leaveType === 'Other' ? request.otherLeaveType : request.leaveType} · ${request.requestedDays} working days · ${formatDate(request.startDate)} to ${formatDate(request.endDate)}`, status: 'Awaiting review' as const, detail: `${request.reason}\nHandover: ${request.handoverName} · ${request.department}` })),
-    ...state.salaryAdvances.filter((advance) => advance.status === 'Pending review').map((advance) => ({ id: `advance-${advance.id}`, recordId: advance.id, source: 'Salary advance' as const, reference: advance.reference, requester: advance.employeeName, submittedAt: advance.requestedAt, summary: `Requested ${money(advance.requestedAmount)} · ${advance.proposedFrequency} repayment`, amount: advance.requestedAmount, status: 'Awaiting review' as const, detail: `${advance.reason}\nProposed installment: ${money(advance.proposedInstallmentAmount)} · First due: ${formatDate(advance.proposedFirstDueDate)}` })),
+    ...salaryAdvances.filter((advance) => advance.status === 'Pending HR review' || advance.status === 'Pending GM review').map((advance) => ({ id: `advance-${advance.id}`, recordId: advance.id, source: 'Salary advance' as const, reference: advance.reference, requester: advance.employeeName, submittedAt: advance.requestedAt, summary: `Requested ${money(advance.requestedAmount)} · ${advance.proposedFrequency} repayment`, amount: advance.requestedAmount, status: 'Awaiting review' as const, detail: `Pending ${advance.status === 'Pending HR review' ? 'Human Resource' : 'General Manager'} approval.\n${advance.reason}\nDate taken: ${formatDate(advance.dateTaken)} · Proposed installment: ${money(advance.hrDecision?.installmentAmount ?? advance.proposedInstallmentAmount)} · Attachments: ${advance.attachments.length}`, advance, approvalStage: advance.status === 'Pending HR review' ? 'Human Resource' as const : 'General Manager' as const })),
     ...state.payrollRuns.filter((run) => run.status === 'In review').map((run) => { const needsReview = run.payslips.filter((slip) => slip.reviewStatus === 'Needs review').length; return { id: `payroll-${run.id}`, recordId: run.id, source: 'Payroll' as const, reference: run.reference, requester: run.createdBy || 'Payroll preparer not recorded', submittedAt: run.updatedAt, summary: `${run.frequency} payroll · ${formatDate(run.periodStart)} to ${formatDate(run.periodEnd)} · ${run.payslips.length} payslips`, status: 'Awaiting review' as const, canApprove: needsReview === 0, detail: `${needsReview} payslips need setup review. Approval requires all payslips marked Ready.` } }),
     ...state.expenses.filter((expense) => expense.status === 'Pending approval').map((expense) => ({ id: `expense-${expense.id}`, recordId: expense.id, source: 'Expense' as const, reference: expense.reference, requester: expense.requestedBy || 'Requester not recorded', submittedAt: expense.createdAt || `${expense.date}T12:00:00.000Z`, summary: `${expense.payee || expense.description} · ${expense.category} · ${expense.department}`, amount: expense.amount, status: 'Awaiting review' as const, detail: `${expense.description}\nDate: ${formatDate(expense.date)} · Type: ${expense.expenseType || 'Not specified'} · Receipts: ${expense.attachments?.length ?? 0}` })),
   ]
 
   const history: ApprovalItem[] = [
     ...state.leaveRequests.flatMap((request) => request.decisions.filter((decision) => decision.decision === 'Approved' || decision.decision === 'Rejected').map((decision) => ({ id: `leave-decision-${decision.id}`, recordId: request.id, source: 'Leave' as const, reference: request.reference, requester: request.employeeName, submittedAt: decision.at, summary: `${request.leaveType === 'Other' ? request.otherLeaveType : request.leaveType} · ${request.requestedDays} days`, status: decision.decision as ApprovalStatus, detail: `${decision.actor}${decision.note ? `\n${decision.note}` : ''}` }))),
-    ...state.salaryAdvances.filter((advance) => ['Approved', 'Rejected'].includes(advance.status)).map((advance) => ({ id: `advance-decision-${advance.id}`, recordId: advance.id, source: 'Salary advance' as const, reference: advance.reference, requester: advance.employeeName, submittedAt: advance.decisionAt || advance.updatedAt, summary: `${money(advance.approvedAmount ?? advance.requestedAmount)} · ${advance.status === 'Approved' ? 'approved terms' : advance.rejectionReason || 'Rejected'}`, amount: advance.approvedAmount ?? advance.requestedAmount, status: advance.status as ApprovalStatus, detail: `${advance.decisionBy || 'Reviewer not recorded'}${advance.rejectionReason ? `\n${advance.rejectionReason}` : ''}` })),
+    ...salaryAdvances.filter((advance) => ['Approved', 'Rejected', 'Active', 'Settled'].includes(advance.status)).map((advance) => ({ id: `advance-decision-${advance.id}`, recordId: advance.id, source: 'Salary advance' as const, reference: advance.reference, requester: advance.employeeName, submittedAt: advance.gmDecision?.decidedAt || advance.hrDecision?.decidedAt || advance.updatedAt, summary: `${money(advance.approvedAmount ?? advance.requestedAmount)} · ${advance.status === 'Rejected' ? advance.rejectionReason || 'Rejected' : 'approved terms'}`, amount: advance.approvedAmount ?? advance.requestedAmount, status: advance.status === 'Rejected' ? 'Rejected' as const : 'Approved' as const, detail: `HR: ${advance.hrDecision?.actorName || 'Not recorded'}${advance.gmDecision ? `\nGeneral Manager: ${advance.gmDecision.actorName}` : ''}${advance.rejectionReason ? `\n${advance.rejectionReason}` : ''}`, advance })),
     ...state.payrollRuns.filter((run) => run.status === 'Approved').map((run) => ({ id: `payroll-decision-${run.id}`, recordId: run.id, source: 'Payroll' as const, reference: run.reference, requester: run.createdBy || 'Payroll preparer not recorded', submittedAt: run.approvedAt || run.updatedAt, summary: `${run.frequency} payroll · ${run.payslips.length} payslips`, status: 'Approved' as const, detail: `${run.approvedBy || 'Approver not recorded'}${run.approvalNote ? `\n${run.approvalNote}` : ''}` })),
     ...state.expenses.flatMap((expense) => (expense.decisions ?? []).map((decision) => ({ id: `expense-decision-${decision.id}`, recordId: expense.id, source: 'Expense' as const, reference: expense.reference, requester: expense.requestedBy || 'Requester not recorded', submittedAt: decision.at, summary: `${expense.payee || expense.description} · ${money(expense.amount)}`, amount: expense.amount, status: decision.decision as ApprovalStatus, detail: `${decision.actor}${decision.note ? `\n${decision.note}` : ''}` }))),
   ]
   return [...pending, ...history].sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
 }
 
-export default function Approvals({ state, updateState }: Props) {
+export default function Approvals({ state, updateState, currentUser, onViewSalaryAdvance }: Props) {
   const [view, setView] = useState<View>('Needs review')
-  const [approver, setApprover] = useState('David Okello')
   const [sourceFilter, setSourceFilter] = useState<'All sources' | Source>('All sources')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<ApprovalItem | null>(null)
   const [decisionNote, setDecisionNote] = useState('')
+  const [decisionTerms, setDecisionTerms] = useState({ amount: 0, frequency: 'Monthly' as AdvanceRepaymentFrequency, installmentAmount: 0 })
   const [message, setMessage] = useState('')
-  const items = useMemo(() => approvalItems(state), [state])
+  const approver = currentUser.name
+  const canReadAdvances = currentUser.roles.some((role) => ['Human Resource', 'General Manager', 'Admin', 'Super Admin'].includes(role))
+  const advanceQuery = useSalaryAdvances(undefined, canReadAdvances)
+  const hrDecisionMutation = useHrSalaryAdvanceDecision()
+  const gmDecisionMutation = useGeneralManagerSalaryAdvanceDecision()
+  const salaryAdvances = advanceQuery.data?.advances ?? []
+  const items = useMemo(() => approvalItems(state, salaryAdvances), [state, salaryAdvances])
   const pending = items.filter((item) => item.status === 'Awaiting review')
   const history = items.filter((item) => item.status !== 'Awaiting review')
   const visible = (view === 'Needs review' ? pending : history).filter((item) => {
@@ -49,20 +56,52 @@ export default function Approvals({ state, updateState }: Props) {
     return (sourceFilter === 'All sources' || item.source === sourceFilter) && searchable.includes(search.trim().toLowerCase())
   })
   const actionable = selected?.status === 'Awaiting review'
-  const openItem = (item: ApprovalItem) => { setSelected(item); setDecisionNote(''); setMessage('') }
+    && (selected.source !== 'Salary advance'
+      || (selected.approvalStage === 'Human Resource' && currentUser.roles.includes('Human Resource'))
+      || (selected.approvalStage === 'General Manager' && currentUser.roles.includes('General Manager')))
+  const openItem = (item: ApprovalItem) => {
+    setSelected(item)
+    setDecisionNote('')
+    setMessage('')
+    if (item.advance) {
+      setDecisionTerms({
+        amount: item.advance.hrDecision?.amount ?? item.advance.requestedAmount,
+        frequency: item.advance.hrDecision?.frequency ?? item.advance.proposedFrequency,
+        installmentAmount: item.advance.hrDecision?.installmentAmount ?? item.advance.proposedInstallmentAmount,
+      })
+    }
+  }
 
-  const decide = (decision: 'Approved' | 'Rejected') => {
+  const decide = async (decision: 'Approved' | 'Rejected') => {
     if (!selected || !actionable) return
     if (decision === 'Rejected' && !decisionNote.trim()) { setMessage('Add a reason before rejecting this request.'); return }
-    if (selected.requester.trim().toLowerCase() === approver.toLowerCase()) { setMessage('Self-approval is not allowed. Select a different reviewer.'); return }
     if (selected.source === 'Leave') {
       const request = state.leaveRequests.find((item) => item.id === selected.recordId)
       if (!request || request.status !== 'Pending') { setMessage('This request is no longer awaiting review.'); return }
       updateState({ ...state, leaveRequests: state.leaveRequests.map((item) => item.id === request.id ? decideLeaveRequest(item, decision, approver, decisionNote) : item) })
     } else if (selected.source === 'Salary advance') {
-      const advance = state.salaryAdvances.find((item) => item.id === selected.recordId)
-      if (!advance || advance.status !== 'Pending review') { setMessage('This request is no longer awaiting review.'); return }
-      updateState({ ...state, salaryAdvances: state.salaryAdvances.map((item) => item.id === advance.id ? decideSalaryAdvance(item, decision, approver, decisionNote) : item) })
+      const advance = selected.advance
+      if (!advance || !['Pending HR review', 'Pending GM review'].includes(advance.status)) { setMessage('This request is no longer awaiting review.'); return }
+      if (decision === 'Approved' && (!Number.isSafeInteger(decisionTerms.amount) || decisionTerms.amount < 1 || decisionTerms.amount > advance.requestedAmount || !Number.isSafeInteger(decisionTerms.installmentAmount) || decisionTerms.installmentAmount < 1 || decisionTerms.installmentAmount > decisionTerms.amount)) {
+        setMessage('Enter a valid approved amount and installment not greater than the requested amount.')
+        return
+      }
+      try {
+        const input = decision === 'Rejected'
+          ? { decision, note: decisionNote.trim() }
+          : {
+              decision,
+              note: decisionNote.trim(),
+              amount: decisionTerms.amount,
+              frequency: decisionTerms.frequency,
+              installmentAmount: decisionTerms.installmentAmount,
+            }
+        if (selected.approvalStage === 'Human Resource') await hrDecisionMutation.mutateAsync({ id: advance.id, input })
+        else await gmDecisionMutation.mutateAsync({ id: advance.id, input })
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : 'Could not save the salary-advance decision.')
+        return
+      }
     } else if (selected.source === 'Payroll') {
       if (decision === 'Rejected') { setMessage('Payroll rejection workflow is not implemented yet. Return the run to its source module for correction.'); return }
       const run = state.payrollRuns.find((item) => item.id === selected.recordId)
@@ -80,8 +119,9 @@ export default function Approvals({ state, updateState }: Props) {
   }
 
   return <div className="animate-in fade-in duration-300">
-    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Overview</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">Approvals</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Review pending requests across HR, payroll, finance, and operations.</p></div><label className="text-[10px] font-semibold text-slate-600">Simulated reviewer<select aria-label="Simulated approval reviewer" value={approver} onChange={(event) => setApprover(event.target.value)} className={`${inputClass} mt-1 block`}><option>David Okello</option><option>Sarah Namirembe</option></select></label></header>
-    <div role="status" className="mb-5 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><Icons.Info className="mt-0.5 size-4 shrink-0" /><p>This local prototype updates the source records, but reviewer identity and authorization are not secure. Backend role checks, self-approval protection, and two-person approval for security actions are still required.</p></div>
+    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Overview</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">Approvals</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Review pending requests across HR, payroll, finance, and operations.</p></div><div className="text-xs text-slate-500">Signed in as <span className="font-semibold text-slate-700">{currentUser.name}</span></div></header>
+    <div role="status" className="mb-5 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-950"><Icons.Info className="mt-0.5 size-4 shrink-0" /><p>Salary advances are loaded from the backend and can only be decided by the designated HR or General Manager reviewer. Other approval modules still use their current local workflows.</p></div>
+    {canReadAdvances && advanceQuery.isError && <div role="alert" className="mb-4 flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800"><span>{advanceQuery.error instanceof Error ? advanceQuery.error.message : 'Could not load salary-advance approvals.'}</span><button type="button" onClick={() => advanceQuery.refetch()} className="font-semibold underline">Retry</button></div>}
 
     <section aria-label="Approval summary" className="mb-5 grid gap-3 sm:grid-cols-3"><SummaryMetric title="Needs review" value={pending.length} icon="ClipboardList" tone="amber" /><SummaryMetric title="Approved" value={history.filter((item) => item.status === 'Approved').length} icon="BadgeCheck" tone="green" /><SummaryMetric title="Rejected" value={history.filter((item) => item.status === 'Rejected').length} icon="CircleX" tone="rose" /></section>
 
@@ -92,7 +132,7 @@ export default function Approvals({ state, updateState }: Props) {
       <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Legacy Pending expenses and unsaved disciplinary letters are not approval requests. Security changes need persisted request records before they can enter this queue.</footer>
     </section>
 
-    {selected && <ApprovalDialog item={selected} note={decisionNote} setNote={setDecisionNote} message={message} onClose={() => { setSelected(null); setMessage('') }} onDecision={decide} />}
+    {selected && <ApprovalDialog item={selected} note={decisionNote} setNote={setDecisionNote} terms={decisionTerms} setTerms={setDecisionTerms} message={message} canAct={Boolean(actionable)} isSaving={hrDecisionMutation.isPending || gmDecisionMutation.isPending} onViewSalaryAdvance={onViewSalaryAdvance} onClose={() => { setSelected(null); setMessage('') }} onDecision={decide} />}
   </div>
 }
 
@@ -102,9 +142,10 @@ function SummaryMetric({ title, value, icon, tone }: { title: string; value: num
   return <article className="rounded-xl border border-slate-200 bg-white p-4"><span className={`grid size-9 place-items-center rounded-lg ${color}`}><Icon className="size-4" /></span><div className="mt-3 text-xl font-bold text-slate-900">{value}</div><div className="mt-0.5 text-xs font-semibold text-slate-700">{title}</div></article>
 }
 
-function ApprovalDialog({ item, note, setNote, message, onClose, onDecision }: { item: ApprovalItem; note: string; setNote: (value: string) => void; message: string; onClose: () => void; onDecision: (decision: 'Approved' | 'Rejected') => void }) {
+function ApprovalDialog({ item, note, setNote, terms, setTerms, message, canAct, isSaving, onViewSalaryAdvance, onClose, onDecision }: { item: ApprovalItem; note: string; setNote: (value: string) => void; terms: { amount: number; frequency: AdvanceRepaymentFrequency; installmentAmount: number }; setTerms: (value: { amount: number; frequency: AdvanceRepaymentFrequency; installmentAmount: number }) => void; message: string; canAct: boolean; isSaving: boolean; onViewSalaryAdvance: (id: string) => void; onClose: () => void; onDecision: (decision: 'Approved' | 'Rejected') => void | Promise<void> }) {
   const isPending = item.status === 'Awaiting review'
-  return <div className="fixed inset-0 z-80 grid place-items-center bg-slate-950/45 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-2xl"><header className="flex items-start justify-between border-b border-slate-100 px-5 py-4"><div><h2 id="approval-dialog-title" className="text-base font-bold text-slate-900">{isPending ? 'Review request' : 'Approval details'}</h2><p className="mt-1 text-xs text-slate-500">{item.source} · {item.reference} · Submitted by {item.requester}</p></div><button type="button" aria-label="Close approval details" onClick={onClose} className="grid size-8 place-items-center rounded-md text-slate-400 hover:bg-slate-100"><Icons.X className="size-4" /></button></header><div className="space-y-4 p-5"><div className="grid gap-4 sm:grid-cols-2"><Detail label="Source module" value={item.source} /><Detail label="Submitted" value={formatDate(item.submittedAt.slice(0, 10))} />{item.amount !== undefined && <Detail label="Amount" value={money(item.amount)} />}<Detail label="Request summary" value={item.summary} wide /></div><div className="rounded-lg bg-slate-50 p-4"><div className="text-[10px] font-semibold uppercase text-slate-400">Request details</div><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">{item.detail}</p></div>{isPending && <label className="block text-xs font-semibold text-slate-600">Decision note <span className="font-normal text-slate-400">(required for rejection)</span><textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary" placeholder="Add context for this decision" /></label>}{message && <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{message}</p>}{item.source === 'Payroll' && item.canApprove === false && <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">Payroll approval is blocked until each payslip is marked Ready in Payroll Management.</p>}<footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">Close</button>{isPending && item.source !== 'Payroll' && <button type="button" onClick={() => onDecision('Rejected')} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700">Reject</button>}{isPending && <button type="button" disabled={item.canApprove === false} onClick={() => onDecision('Approved')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Approve</button>}</footer></div></section></div>
+  const canDecide = isPending && (item.source !== 'Salary advance' || canAct)
+  return <div className="fixed inset-0 z-80 grid place-items-center bg-slate-950/45 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) onClose() }}><section role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-2xl"><header className="flex items-start justify-between border-b border-slate-100 px-5 py-4"><div><h2 id="approval-dialog-title" className="text-base font-bold text-slate-900">{isPending ? 'Review request' : 'Approval details'}</h2><p className="mt-1 text-xs text-slate-500">{item.source} · {item.reference} · Submitted by {item.requester}</p></div><button type="button" aria-label="Close approval details" disabled={isSaving} onClick={onClose} className="grid size-8 place-items-center rounded-md text-slate-400 hover:bg-slate-100"><Icons.X className="size-4" /></button></header><div className="space-y-4 p-5"><div className="grid gap-4 sm:grid-cols-2"><Detail label="Source module" value={item.source} /><Detail label="Submitted" value={formatDate(item.submittedAt.slice(0, 10))} />{item.amount !== undefined && <Detail label="Amount" value={money(item.amount)} />}<Detail label="Request summary" value={item.summary} wide /></div><div className="rounded-lg bg-slate-50 p-4"><div className="text-[10px] font-semibold uppercase text-slate-400">Request details</div><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">{item.detail}</p></div>{item.source === 'Salary advance' && item.advance && <button type="button" onClick={() => onViewSalaryAdvance(item.advance!.id)} className="text-xs font-semibold text-primary underline">Open salary advance details</button>}{isPending && item.source === 'Salary advance' && canAct && <fieldset className="grid gap-3 rounded-lg border border-slate-200 p-4 sm:grid-cols-3"><legend className="px-1 text-xs font-semibold text-slate-700">{item.approvalStage} proposed/final terms</legend><label className="text-[10px] font-semibold text-slate-600">Approved amount<input type="number" min={1} max={item.advance?.requestedAmount} value={terms.amount} onChange={(event) => setTerms({ ...terms, amount: Number(event.target.value) })} className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-xs" /></label><label className="text-[10px] font-semibold text-slate-600">Repayment frequency<select value={terms.frequency} onChange={(event) => setTerms({ ...terms, frequency: event.target.value as AdvanceRepaymentFrequency })} className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-xs"><option>Weekly</option><option>Monthly</option></select></label><label className="text-[10px] font-semibold text-slate-600">Installment<input type="number" min={1} max={terms.amount || undefined} value={terms.installmentAmount} onChange={(event) => setTerms({ ...terms, installmentAmount: Number(event.target.value) })} className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-2 text-xs" /></label></fieldset>}{isPending && item.source === 'Salary advance' && !canAct && <p role="status" className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">This request is awaiting {item.approvalStage} approval. Your account does not have the required reviewer role.</p>}{isPending && canDecide && <label className="block text-xs font-semibold text-slate-600">Decision note <span className="font-normal text-slate-400">(required for rejection)</span><textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary" placeholder="Add context for this decision" /></label>}{message && <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{message}</p>}{item.source === 'Payroll' && item.canApprove === false && <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">Payroll approval is blocked until each payslip is marked Ready in Payroll Management.</p>}<footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={isSaving} onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">Close</button>{canDecide && item.source !== 'Payroll' && <button type="button" disabled={isSaving} onClick={() => onDecision('Rejected')} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">Reject</button>}{canDecide && <button type="button" disabled={isSaving || item.canApprove === false} onClick={() => onDecision('Approved')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">{isSaving ? 'Saving…' : 'Approve'}</button>}</footer></div></section></div>
 }
 
 function Detail({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) { return <div className={wide ? 'sm:col-span-2' : ''}><div className="text-[10px] font-medium uppercase text-slate-400">{label}</div><div className="mt-1 text-xs font-semibold text-slate-800">{value}</div></div> }

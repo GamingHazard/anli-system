@@ -4,11 +4,14 @@ import { useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import { createId, employeeDisplayName, exportCsv, formatDate, money, type Employee, type ErpState, type PayrollFrequency, type PayrollPayslipSnapshot, type PayrollRun, type PayrollRunStatus } from '@/lib/erp'
 import { approvePayrollRun } from '@/lib/approvals'
+import { useRecordPayrollSalaryAdvanceRepayments } from '@/lib/salary-advance-queries'
+import type { UserAccount } from '@/lib/user-api'
 
 type PayrollManagementProps = {
   state: ErpState
   updateState: (next: ErpState) => void
   initialRunId?: string | null
+  currentUser: UserAccount
   onViewEmployee: (id: string) => void
 }
 
@@ -65,13 +68,16 @@ function statusTone(status: string) {
   return 'bg-slate-100 text-slate-600'
 }
 
-export default function PayrollManagementPage({ state, updateState, initialRunId = null, onViewEmployee }: PayrollManagementProps) {
+export default function PayrollManagementPage({ state, updateState, initialRunId = null, currentUser, onViewEmployee }: PayrollManagementProps) {
   const [frequency, setFrequency] = useState<PayrollFrequency>('Monthly')
   const [period, setPeriod] = useState(() => currentPeriod('Monthly'))
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All statuses')
   const [frequencyFilter, setFrequencyFilter] = useState('All frequencies')
+  const [payrollRepaymentError, setPayrollRepaymentError] = useState('')
+  const payrollRepaymentMutation = useRecordPayrollSalaryAdvanceRepayments()
+  const canPostAdvanceRepayments = currentUser.roles.some((role) => ['Human Resource', 'Accountant'].includes(role))
   const employeesForFrequency = state.employees.filter((employee) => employee.status === 'Active' && employee.paymentFrequency === frequency)
   const validPeriod = Boolean(period.periodStart && period.periodEnd && period.periodStart <= period.periodEnd)
   const matchingRuns = state.payrollRuns.filter((run) => run.frequency === frequency && run.periodStart === period.periodStart && run.periodEnd === period.periodEnd)
@@ -110,7 +116,7 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
       status: 'Draft',
       createdAt: now,
       updatedAt: now,
-      createdBy: 'Sarah Namirembe',
+      createdBy: currentUser.name,
       payslips: employeesForFrequency.map((employee) => makePayslip(employee, state, frequency, period.periodStart, period.periodEnd)),
     }
     updateState({ ...state, payrollRuns: [run, ...state.payrollRuns] })
@@ -143,14 +149,57 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
     }))
   }
 
-  const transitionRun = (nextStatus: PayrollRunStatus) => {
+  const transitionRun = async (nextStatus: PayrollRunStatus) => {
     if (!selectedRun || selectedRun.status === 'Paid') return
     if (nextStatus === 'In review' && (selectedRun.status !== 'Draft' || needsReview > 0)) return
     if (nextStatus === 'Approved' && (selectedRun.status !== 'In review' || needsReview > 0)) return
     if (nextStatus === 'Paid' && selectedRun.status !== 'Approved') return
     if (nextStatus === 'Approved') {
-      const approved = approvePayrollRun(selectedRun, 'Sarah Namirembe')
+      const approved = approvePayrollRun(selectedRun, currentUser.name)
       if (approved !== selectedRun) updateRun(selectedRun.id, () => approved)
+      return
+    }
+    if (nextStatus === 'Paid') {
+      if (!canPostAdvanceRepayments) {
+        setPayrollRepaymentError('Only Human Resource or an Accountant can record payroll-linked salary-advance repayments.')
+        return
+      }
+      setPayrollRepaymentError('')
+      try {
+        const posted = await Promise.all(selectedRun.payslips.map((slip) => payrollRepaymentMutation.mutateAsync({
+          payrollRunId: selectedRun.id,
+          payslipId: slip.id,
+          employeeId: slip.employeeId,
+          periodEnd: selectedRun.periodEnd,
+        })))
+        const now = new Date().toISOString()
+        updateRun(selectedRun.id, (run) => ({
+          ...run,
+          status: 'Paid',
+          updatedAt: now,
+          paidAt: now,
+          payslips: run.payslips.map((slip) => {
+            const repayments = posted.flatMap((result, index) => selectedRun.payslips[index].id === slip.id ? result.repayments : [])
+            const advanceDeductions = repayments.map((repayment) => ({
+              id: `ADV-REPAY-${repayment.id}`,
+              label: `Salary advance repayment · ${repayment.advanceReference}`,
+              amount: repayment.amount,
+              source: 'Salary advance' as const,
+            }))
+            const deductions = [...slip.deductions.filter((item) => item.source !== 'Salary advance'), ...advanceDeductions]
+            const advanceTotal = advanceDeductions.reduce((total, item) => total + item.amount, 0)
+            return {
+              ...slip,
+              deductions,
+              deductionTotal: slip.deductionTotal === undefined ? advanceTotal : slip.deductionTotal + advanceTotal,
+              netPay: slip.grossPay === undefined ? slip.netPay : Math.max(0, slip.grossPay - (slip.deductionTotal ?? 0) - advanceTotal),
+              paymentStatus: 'Paid',
+            }
+          }),
+        }))
+      } catch (error) {
+        setPayrollRepaymentError(error instanceof Error ? error.message : 'Salary-advance repayments could not be posted. The payroll run remains approved and unpaid; retrying is safe.')
+      }
       return
     }
     const now = new Date().toISOString()
@@ -159,8 +208,8 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
       status: nextStatus,
       updatedAt: now,
       approvedAt: run.approvedAt,
-      paidAt: nextStatus === 'Paid' ? now : run.paidAt,
-      payslips: nextStatus === 'Paid' ? run.payslips.map((slip) => ({ ...slip, paymentStatus: 'Paid' })) : run.payslips,
+      paidAt: run.paidAt,
+      payslips: run.payslips,
     }))
   }
 
@@ -207,6 +256,8 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
       <PayrollMetric label="Payslips needing review" value={periodReviewCount} detail="Pay setup must be verified" icon="ClipboardCheck" tone="amber" />
       <PayrollMetric label="Paid payslips" value={periodPaidCount} detail="Recorded in saved run snapshots" icon="CircleDollarSign" tone="green" />
     </section>
+    {payrollRepaymentError && <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800">{payrollRepaymentError}</p>}
+    {selectedRun?.status === 'Approved' && !canPostAdvanceRepayments && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">Only Human Resource or an Accountant can record this run as paid because payment posts any due salary-advance deductions.</p>}
 
     {selectedRun ? <section className="mb-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-start sm:justify-between">
@@ -214,7 +265,7 @@ export default function PayrollManagementPage({ state, updateState, initialRunId
         <div className="flex flex-wrap gap-2"><button type="button" onClick={() => exportRun(selectedRun)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"><Icons.Download className="size-4" /> Export payslips</button>{selectedRun.status === 'Draft' && <button type="button" onClick={deleteDraft} className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"><Icons.Trash2 className="size-4" /> Delete draft</button>}</div>
       </div>
       <div className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 xl:grid-cols-4"><PayrollValue label="Employees" value={selectedRun.payslips.length} /><PayrollValue label="Needs setup review" value={needsReview} /><PayrollValue label="Gross pay" value="Not calculated" /><PayrollValue label="Net pay" value="Not calculated" /></div>
-      <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="text-xs font-semibold text-slate-700">Run workflow</div><p className="mt-1 text-[11px] text-slate-500">Pay totals, statutory deductions, and payment execution are not calculated in this phase.</p></div><div className="flex flex-wrap gap-2">{selectedRun.status === 'Draft' && <button type="button" disabled={needsReview > 0} onClick={() => transitionRun('In review')} className="rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Submit for review</button>}{selectedRun.status === 'In review' && <button type="button" disabled={needsReview > 0} onClick={() => transitionRun('Approved')} className="rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve run</button>}{selectedRun.status === 'Approved' && <button type="button" onClick={() => transitionRun('Paid')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white">Record as paid</button>}{selectedRun.status === 'Paid' && <span className="self-center text-xs font-semibold text-emerald-700">Paid {selectedRun.paidAt ? formatDate(selectedRun.paidAt.slice(0, 10)) : ''} · snapshot locked</span>}</div></div>
+      <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="text-xs font-semibold text-slate-700">Run workflow</div><p className="mt-1 text-[11px] text-slate-500">Net pay and statutory deductions are not calculated. Recording payment posts due salary-advance repayments first.</p></div><div className="flex flex-wrap gap-2">{selectedRun.status === 'Draft' && <button type="button" disabled={needsReview > 0} onClick={() => transitionRun('In review')} className="rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Submit for review</button>}{selectedRun.status === 'In review' && <button type="button" disabled={needsReview > 0} onClick={() => transitionRun('Approved')} className="rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Approve run</button>}{selectedRun.status === 'Approved' && <button type="button" disabled={!canPostAdvanceRepayments || payrollRepaymentMutation.isPending} onClick={() => void transitionRun('Paid')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">{payrollRepaymentMutation.isPending ? 'Posting repayments…' : 'Record as paid'}</button>}{selectedRun.status === 'Paid' && <span className="self-center text-xs font-semibold text-emerald-700">Paid {selectedRun.paidAt ? formatDate(selectedRun.paidAt.slice(0, 10)) : ''} · snapshot locked</span>}</div></div>
       {selectedRun.payslips.length ? <div className="overflow-x-auto"><table className="w-full min-w-250 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Employee snapshot', 'Category / department', 'Pay setup', 'Attendance units', 'Earnings / deductions', 'Review', 'Payment'].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{selectedRun.payslips.map((slip) => <tr key={slip.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3"><div className="font-semibold text-slate-800">{slip.employeeName}</div><div className="mt-1 font-mono text-[10px] text-slate-400">{slip.employeeNumber} · {slip.role}</div></td><td className="px-4 py-3">{slip.category}<span className="mt-1 block text-[10px] text-slate-400">{slip.department}</span></td><td className="px-4 py-3">{slip.compensationType ?? <span className="font-semibold text-amber-700">Pay type missing</span>}<span className="mt-1 block">{slip.configuredRate ? money(slip.configuredRate) : <span className="text-amber-700">Rate missing</span>}</span><span className="mt-1 block text-[10px] text-slate-400">{slip.compensationType === 'Wage earner' ? 'Daily rate reference only' : 'Configured rate · no calculation'}</span></td><td className="px-4 py-3">{slip.attendanceUnits ?? 0}<span className="mt-1 block text-[10px] text-slate-400">Reference only · half-day = 0.5</span></td><td className="px-4 py-3"><div>Earnings: {slip.grossPay === undefined ? 'Not calculated' : money(slip.grossPay)}</div><div className="mt-1">Deductions: {slip.deductionTotal === undefined ? 'Not calculated' : money(slip.deductionTotal)}</div><div className="mt-1 font-semibold text-slate-800">Net: {slip.netPay === undefined ? 'Not calculated' : money(slip.netPay)}</div></td><td className="px-4 py-3"><span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone(slip.reviewStatus)}`}>{slip.reviewStatus}</span>{selectedRun.status !== 'Paid' && <div className="mt-2">{slip.reviewStatus === 'Needs review' ? <><button type="button" onClick={() => onViewEmployee(slip.employeeId)} className="font-semibold text-[#6d28d9] hover:underline">Review employee setup</button><button type="button" onClick={() => refreshPayslipSetup(slip)} className="ml-2 font-semibold text-slate-500 hover:underline">Refresh snapshot</button></> : <button type="button" onClick={() => setPayslipReview(slip, 'Needs review')} className="font-semibold text-slate-500 hover:underline">Flag for review</button>}</div>}</td><td className="px-4 py-3"><span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone(slip.paymentStatus)}`}>{slip.paymentStatus}</span></td></tr>)}</tbody></table></div> : <div className="px-5 py-12 text-center"><Icons.UsersRound className="mx-auto size-5 text-slate-300" /><h4 className="mt-2 text-sm font-semibold text-slate-700">No employees in this run</h4><p className="mt-1 text-xs text-slate-500">No active employees have {selectedRun.frequency.toLowerCase()} payment frequency.</p></div>}
       <div className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Payslip identity and setup values are snapshots from run creation; paid runs cannot be edited.</div>
     </section> : null}

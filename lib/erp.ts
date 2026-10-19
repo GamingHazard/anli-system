@@ -39,7 +39,7 @@ export type Order = {
   notes: string
 }
 export type EmployeeCategory = 'Staff employee' | 'Casual worker' | 'Other' | 'Staff' | 'Casual'
-export type EmployeeDocument = { title: string; url: string; publicId: string; download_Url: string }
+export type EmployeeDocument = { id?: string; title: string; url: string; publicId?: string; download_Url: string; fileName?: string; uploadedAt?: string }
 export type EmployeeParent = { name: string; phone: string; address: string; status: 'Alive' | 'Deceased' | '' }
 export type Employee = {
   id: string
@@ -78,6 +78,7 @@ export type Employee = {
   nssfApplies?: boolean
   taxApplies?: boolean
   photoUrl?: string
+  image?: { url: string; publicId: string }
   documents?: EmployeeDocument[]
   notes?: string
 }
@@ -130,7 +131,7 @@ export type PayrollFrequency = 'Monthly' | 'Weekly'
 export type PayrollRunStatus = 'Draft' | 'In review' | 'Approved' | 'Paid'
 export type PayrollReviewStatus = 'Needs review' | 'Ready'
 export type PayrollPaymentStatus = 'Unpaid' | 'Paid'
-export type PayrollLineItem = { id: string; label: string; amount?: number }
+export type PayrollLineItem = { id: string; label: string; amount?: number; source?: 'Salary advance' }
 export type PayrollPayslipSnapshot = {
   id: string
   employeeId: string
@@ -168,12 +169,14 @@ export type PayrollRun = {
   notes?: string
   payslips: PayrollPayslipSnapshot[]
 }
-export type AdvanceStatus = 'Pending review' | 'Approved' | 'Rejected' | 'Active' | 'Settled'
+export type AdvanceStatus = 'Pending HR review' | 'Pending GM review' | 'Pending review' | 'Approved' | 'Rejected' | 'Active' | 'Settled' | 'Legacy archive'
 export type AdvanceRepaymentFrequency = 'Weekly' | 'Monthly'
 export type AdvanceRepaymentMethod = 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Payroll'
 export type AdvanceScheduleEntry = { id: string; dueDate: string; plannedAmount: number }
-export type AdvanceRepayment = { id: string; date: string; amount: number; method: AdvanceRepaymentMethod; reference?: string; note?: string; recordedAt: string }
+export type AdvanceRepayment = { id: string; date: string; amount: number; method: AdvanceRepaymentMethod; reference?: string; note?: string; recordedAt: string; scheduleEntryIds?: string[]; payrollRunId?: string; payslipId?: string }
 export type AdvanceActivity = { id: string; action: string; actor: string; at: string; note?: string }
+export type AdvanceDecision = { decision: 'Approved' | 'Rejected'; actorId: string; actorName: string; role: 'Human Resource' | 'General Manager'; note?: string; amount?: number; frequency?: AdvanceRepaymentFrequency; installmentAmount?: number; decidedAt: string; legacy?: boolean }
+export type AdvanceAttachment = { id: string; name: string; url?: string; publicId?: string; resourceType?: 'image' | 'raw'; dataUrl?: string; mediaType: string; sizeBytes: number; uploadedAt?: string }
 export type SalaryAdvance = {
   id: string
   reference: string
@@ -186,22 +189,28 @@ export type SalaryAdvance = {
   paymentFrequency?: Employee['paymentFrequency']
   requestedAmount: number
   reason: string
+  dateTaken: string
+  dateApproved?: string
+  attachments: AdvanceAttachment[]
   requestedAt: string
   proposedFrequency: AdvanceRepaymentFrequency
   proposedInstallmentAmount: number
-  proposedFirstDueDate: string
   status: AdvanceStatus
   approvedAmount?: number
   approvedFrequency?: AdvanceRepaymentFrequency
   approvedInstallmentAmount?: number
-  firstDueDate?: string
   decisionAt?: string
   decisionBy?: string
+  hrDecision?: AdvanceDecision
+  gmDecision?: AdvanceDecision
   rejectionReason?: string
-  disbursement?: { amount: number; date: string; method: Exclude<AdvanceRepaymentMethod, 'Payroll'>; reference?: string; recordedAt: string }
+  disbursement?: { amount: number; date: string; method: Exclude<AdvanceRepaymentMethod, 'Payroll'>; reference?: string; recordedAt: string; recordedBy?: string }
   schedule: AdvanceScheduleEntry[]
   repayments: AdvanceRepayment[]
   activity: AdvanceActivity[]
+  legacyUnverified?: boolean
+  legacyStatus?: string
+  legacyReference?: string
   createdAt: string
   updatedAt: string
 }
@@ -425,6 +434,109 @@ export const paymentStateForSale = (sale: Sale, payments: SalePayment[], today =
 export const isWithinDays = (date: string, days: number) => (Date.now() - new Date(date).getTime()) / 86400000 <= days
 export const simulate = <T,>(value: T, delay = 260) => new Promise<T>((resolve) => setTimeout(() => resolve(value), delay))
 const STORAGE_KEY = 'lumina-erp-demo-v1'
+const LEGACY_EMPLOYEE_IMPORT_KEY = 'lumina-erp-employee-import-v1'
+const LEGACY_ATTENDANCE_KEY = 'lumina-erp-attendance-archive-v1'
+const LEGACY_SALARY_ADVANCE_KEY = 'lumina-erp-salary-advance-archive-v1'
+const LEGACY_DEMO_EMPLOYEE_NUMBERS = new Set(['EMP-001', 'EMP-002', 'EMP-003', 'EMP-004', 'EMP-005'])
+const LEGACY_DEMO_EMPLOYEE_IDS = new Set(['E-001', 'E-002', 'E-003', 'E-004', 'E-005'])
+const preserveLegacyEmployeeData = (saved: string) => {
+  try {
+    if (window.localStorage.getItem(LEGACY_EMPLOYEE_IMPORT_KEY)) return
+    const parsed = JSON.parse(saved) as Partial<ErpState>
+    const employees = Array.isArray(parsed.employees)
+      ? parsed.employees.filter((employee) => employee
+        && !LEGACY_DEMO_EMPLOYEE_NUMBERS.has(String(employee.number || ''))
+        && !LEGACY_DEMO_EMPLOYEE_IDS.has(String(employee.id || '')))
+      : []
+    const employeeDrafts = Array.isArray(parsed.employeeDrafts) ? parsed.employeeDrafts : []
+    if (employees.length || employeeDrafts.length) {
+      window.localStorage.setItem(LEGACY_EMPLOYEE_IMPORT_KEY, JSON.stringify({ employees, employeeDrafts }))
+    }
+  } catch {
+    return
+  }
+}
+const preserveLegacyAttendanceData = (saved: string) => {
+  try {
+    if (window.localStorage.getItem(LEGACY_ATTENDANCE_KEY)) return true
+    const parsed = JSON.parse(saved) as Partial<ErpState>
+    const records = normalizeAttendanceRecords(parsed.attendanceRecords)
+    if (records.length) {
+      window.localStorage.setItem(LEGACY_ATTENDANCE_KEY, JSON.stringify(records))
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+const preserveLegacySalaryAdvanceData = (saved: string) => {
+  try {
+    if (typeof window === 'undefined') return false
+    if (window.localStorage.getItem(LEGACY_SALARY_ADVANCE_KEY)) return true
+    const parsed = JSON.parse(saved) as Partial<ErpState>
+    if (!Array.isArray(parsed.salaryAdvances) || !parsed.salaryAdvances.length) return false
+    window.localStorage.setItem(LEGACY_SALARY_ADVANCE_KEY, JSON.stringify({
+      advances: parsed.salaryAdvances,
+      preservedAt: new Date().toISOString(),
+      importedAt: null,
+    }))
+    return true
+  } catch {
+    console.error('Could not retain the previous browser salary-advance snapshot.')
+    return false
+  }
+}
+
+export const getLegacySalaryAdvanceImport = (): { advances: SalaryAdvance[]; preservedAt: string; importedAt: string | null } | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = window.localStorage.getItem(LEGACY_SALARY_ADVANCE_KEY)
+    if (!value) return null
+    const parsed = JSON.parse(value) as { advances?: unknown; preservedAt?: unknown; importedAt?: unknown }
+    return {
+      advances: normalizeSalaryAdvances(parsed.advances),
+      preservedAt: typeof parsed.preservedAt === 'string' ? parsed.preservedAt : '',
+      importedAt: typeof parsed.importedAt === 'string' ? parsed.importedAt : null,
+    }
+  } catch {
+    console.error('Could not read the preserved browser salary-advance snapshot.')
+    return null
+  }
+}
+
+export const markLegacySalaryAdvancesImported = () => {
+  if (typeof window === 'undefined') return
+  try {
+    const preserved = getLegacySalaryAdvanceImport()
+    if (!preserved) return
+    window.localStorage.setItem(LEGACY_SALARY_ADVANCE_KEY, JSON.stringify({
+      ...preserved,
+      importedAt: new Date().toISOString(),
+    }))
+  } catch {
+    console.error('Could not mark the preserved salary-advance snapshot as imported.')
+  }
+}
+
+export const getLegacyEmployeeImport = (): { employees: Partial<Employee>[]; employeeDrafts: EmployeeDraft[] } | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    const saved = window.localStorage.getItem(LEGACY_EMPLOYEE_IMPORT_KEY)
+    if (!saved) return null
+    const parsed = JSON.parse(saved) as { employees?: unknown; employeeDrafts?: unknown }
+    return {
+      employees: Array.isArray(parsed.employees) ? parsed.employees as Partial<Employee>[] : [],
+      employeeDrafts: Array.isArray(parsed.employeeDrafts) ? parsed.employeeDrafts as EmployeeDraft[] : [],
+    }
+  } catch {
+    return null
+  }
+}
+
+export const clearLegacyEmployeeImport = () => {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_EMPLOYEE_IMPORT_KEY)
+}
 const stockMovementTypes: StockMovementType[] = ['Opening balance', 'Stock in', 'Stock out', 'Production use', 'Transfer', 'Adjustment increase', 'Adjustment decrease']
 
 const normalizeStockMovements = (value: unknown): StockMovement[] => {
@@ -864,18 +976,21 @@ export const loadState = (): ErpState => {
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY)
     if (!saved) return linkCustomerTransactions(cloneSeed())
+    preserveLegacyEmployeeData(saved)
+    const attendancePreserved = preserveLegacyAttendanceData(saved)
+    preserveLegacySalaryAdvanceData(saved)
     const parsed = JSON.parse(saved) as Partial<ErpState>
     const defaults = cloneSeed()
     const customers = Array.isArray(parsed.customers) ? parsed.customers : defaults.customers
     const sales = Array.isArray(parsed.sales) ? parsed.sales : defaults.sales
     const payments = Array.isArray(parsed.payments) ? parsed.payments : []
     const orders = Array.isArray(parsed.orders) ? parsed.orders.map(normalizeOrder) : defaults.orders
-    const employees = (Array.isArray(parsed.employees) ? parsed.employees : defaults.employees).map(normalizeEmployee)
-    const employeeDrafts = Array.isArray(parsed.employeeDrafts) ? parsed.employeeDrafts : []
-    const attendanceRecords = normalizeAttendanceRecords(parsed.attendanceRecords)
+    const employees: Employee[] = []
+    const employeeDrafts: EmployeeDraft[] = []
+    const attendanceRecords: AttendanceRecord[] = []
     const leaveRequests = normalizeLeaveRequests(parsed.leaveRequests)
     const payrollRuns = normalizePayrollRuns(parsed.payrollRuns)
-    const salaryAdvances = normalizeSalaryAdvances(parsed.salaryAdvances)
+    const salaryAdvances: SalaryAdvance[] = []
     const materials = Array.isArray(parsed.materials) ? parsed.materials as RawMaterial[] : defaults.materials
     const stockMovements = Array.isArray(parsed.stockMovements) ? normalizeStockMovements(parsed.stockMovements) : openingMovementsFor(materials)
     const productionRecipes = normalizeProductionRecipes(parsed.productionRecipes)
@@ -888,18 +1003,20 @@ export const loadState = (): ErpState => {
     const invoices = normalizeInvoices(parsed.invoices, sales, customers, companyProfile)
     const state = linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, invoices, payments, orders, employees, employeeDrafts, attendanceRecords, leaveRequests, payrollRuns, salaryAdvances, materials, stockMovements, productionRecipes, productionRuns, finishedProducts, finishedStockMovements, assets, assetEvents, companyProfile })
     state.materials = state.materials.map((material) => ({ ...material, quantity: Math.max(0, stockQuantityAtLocation(material.id, stockMovements)) }))
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, companyProfile: emptyCompanyProfile }))
+    if (attendancePreserved) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, employees: [], employeeDrafts: [], attendanceRecords: [], salaryAdvances: [], companyProfile: emptyCompanyProfile }))
+    }
     return state
   } catch {
     return linkCustomerTransactions(cloneSeed())
   }
 }
 
-const normalizeSalaryAdvances = (value: unknown): SalaryAdvance[] => {
+export const normalizeSalaryAdvances = (value: unknown): SalaryAdvance[] => {
   if (!Array.isArray(value)) return []
   return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
     .map((advance, index) => {
-      const status: AdvanceStatus = ['Pending review', 'Approved', 'Rejected', 'Active', 'Settled'].includes(String(advance.status)) ? advance.status as AdvanceStatus : 'Pending review'
+      const status: AdvanceStatus = ['Pending HR review', 'Pending GM review', 'Pending review', 'Approved', 'Rejected', 'Active', 'Settled', 'Legacy archive'].includes(String(advance.status)) ? advance.status as AdvanceStatus : 'Pending review'
       const frequency = (input: unknown): AdvanceRepaymentFrequency => input === 'Weekly' ? 'Weekly' : 'Monthly'
       const method = (input: unknown): AdvanceRepaymentMethod => ['Cash', 'Mobile Money', 'Bank Transfer', 'Payroll'].includes(String(input)) ? input as AdvanceRepaymentMethod : 'Cash'
       const schedule: AdvanceScheduleEntry[] = Array.isArray(advance.schedule)
@@ -946,15 +1063,35 @@ const normalizeSalaryAdvances = (value: unknown): SalaryAdvance[] => {
         paymentFrequency: advance.paymentFrequency === 'Weekly' || advance.paymentFrequency === 'Monthly' ? advance.paymentFrequency as Employee['paymentFrequency'] : undefined,
         requestedAmount: Math.max(0, Number(advance.requestedAmount) || 0),
         reason: String(advance.reason || ''),
+        dateTaken: typeof advance.dateTaken === 'string'
+          ? advance.dateTaken
+          : String(advance.requestedAt || createdAt).slice(0, 10),
+        dateApproved: status === 'Approved' || status === 'Active' || status === 'Settled'
+          ? (typeof advance.dateApproved === 'string'
+            ? advance.dateApproved
+            : typeof advance.decisionAt === 'string' ? advance.decisionAt.slice(0, 10) : undefined)
+          : undefined,
+        attachments: Array.isArray(advance.attachments)
+          ? advance.attachments.filter((attachment): attachment is Record<string, unknown> => Boolean(attachment && typeof attachment === 'object'))
+            .map((attachment, attachmentIndex) => ({
+              id: String(attachment.id || `AATT-${index + 1}-${attachmentIndex + 1}`),
+              name: String(attachment.name || 'Attachment'),
+              dataUrl: typeof attachment.dataUrl === 'string' ? attachment.dataUrl : undefined,
+              url: typeof attachment.url === 'string' ? attachment.url : undefined,
+              publicId: typeof attachment.publicId === 'string' ? attachment.publicId : undefined,
+              resourceType: attachment.resourceType === 'raw' ? 'raw' as const : attachment.resourceType === 'image' ? 'image' as const : undefined,
+              mediaType: typeof attachment.mediaType === 'string' ? attachment.mediaType : 'image/jpeg',
+              sizeBytes: Math.max(0, Number(attachment.sizeBytes) || 0),
+            }))
+            .filter((attachment) => Boolean(attachment.dataUrl?.startsWith('data:image/') || attachment.url))
+          : [],
         requestedAt: typeof advance.requestedAt === 'string' ? advance.requestedAt : createdAt,
         proposedFrequency: frequency(advance.proposedFrequency),
         proposedInstallmentAmount: Math.max(0, Number(advance.proposedInstallmentAmount) || 0),
-        proposedFirstDueDate: String(advance.proposedFirstDueDate || ''),
         status,
         approvedAmount: Number(advance.approvedAmount) > 0 ? Number(advance.approvedAmount) : undefined,
         approvedFrequency: advance.approvedFrequency === 'Weekly' || advance.approvedFrequency === 'Monthly' ? advance.approvedFrequency as AdvanceRepaymentFrequency : undefined,
         approvedInstallmentAmount: Number(advance.approvedInstallmentAmount) > 0 ? Number(advance.approvedInstallmentAmount) : undefined,
-        firstDueDate: typeof advance.firstDueDate === 'string' ? advance.firstDueDate : undefined,
         decisionAt: typeof advance.decisionAt === 'string' ? advance.decisionAt : undefined,
         decisionBy: typeof advance.decisionBy === 'string' ? advance.decisionBy : undefined,
         rejectionReason: typeof advance.rejectionReason === 'string' ? advance.rejectionReason : undefined,
@@ -962,6 +1099,11 @@ const normalizeSalaryAdvances = (value: unknown): SalaryAdvance[] => {
         schedule,
         repayments,
         activity,
+        legacyUnverified: Boolean(advance.legacyUnverified),
+        legacyStatus: typeof advance.legacyStatus === 'string' ? advance.legacyStatus : undefined,
+        legacyReference: typeof advance.legacyReference === 'string' ? advance.legacyReference : undefined,
+        hrDecision: advance.hrDecision && typeof advance.hrDecision === 'object' ? advance.hrDecision as AdvanceDecision : undefined,
+        gmDecision: advance.gmDecision && typeof advance.gmDecision === 'object' ? advance.gmDecision as AdvanceDecision : undefined,
         createdAt,
         updatedAt: typeof advance.updatedAt === 'string' ? advance.updatedAt : createdAt,
       }
@@ -975,6 +1117,7 @@ const normalizePayrollLineItems = (value: unknown): PayrollLineItem[] => {
       id: String(item.id || `LINE-${index + 1}`),
       label: String(item.label || 'Unspecified item'),
       amount: Number.isFinite(Number(item.amount)) && item.amount !== null && item.amount !== '' ? Math.max(0, Number(item.amount)) : undefined,
+      source: item.source === 'Salary advance' ? 'Salary advance' as const : undefined,
     }))
 }
 
@@ -1114,8 +1257,25 @@ const normalizeEmployee = (value: unknown): Employee => {
   return employee
 }
 
-export const saveState = (state: ErpState) => { if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, companyProfile: emptyCompanyProfile })) }
-export const clearState = () => { if (typeof window !== 'undefined') window.localStorage.removeItem(STORAGE_KEY) }
+export const saveState = (state: ErpState) => {
+  if (typeof window === 'undefined') return
+  const saved = window.localStorage.getItem(STORAGE_KEY)
+  if (saved) preserveLegacySalaryAdvanceData(saved)
+  const preserved = !saved || preserveLegacyAttendanceData(saved)
+  const payload: ErpState = { ...state, employees: [], employeeDrafts: [], attendanceRecords: [], salaryAdvances: [], companyProfile: emptyCompanyProfile }
+  if (!preserved && saved) {
+    try {
+      const previous = JSON.parse(saved) as Partial<ErpState>
+      payload.attendanceRecords = Array.isArray(previous.attendanceRecords)
+        ? normalizeAttendanceRecords(previous.attendanceRecords)
+        : []
+    } catch {
+      console.error('Could not retain the previous browser attendance snapshot.')
+    }
+  }
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+}
+export const clearState = () => { if (typeof window !== 'undefined') { window.localStorage.removeItem(STORAGE_KEY); window.localStorage.removeItem(LEGACY_EMPLOYEE_IMPORT_KEY); window.localStorage.removeItem(LEGACY_ATTENDANCE_KEY); window.localStorage.removeItem(LEGACY_SALARY_ADVANCE_KEY) } }
 export const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
 export const exportCsv = (filename: string, rows: Record<string, unknown>[]) => { if (!rows.length) return; const headers = Object.keys(rows[0]); const csv = [headers.join(','), ...rows.map(row => headers.map(header => JSON.stringify(row[header] ?? '')).join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url) }
 export const navGroups = [
