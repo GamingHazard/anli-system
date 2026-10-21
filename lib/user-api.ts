@@ -1,4 +1,4 @@
-import type { AdvanceRepaymentMethod, AdvanceRepaymentFrequency, AttendanceRecord, AttendanceStatus, CompanyProfile, Employee, EmployeeDraft, EmployeeDocument, SalaryAdvance } from './erp'
+import { employeeDisplayName, type AdvanceRepaymentMethod, type AdvanceRepaymentFrequency, type AttendanceRecord, type AttendanceStatus, type CompanyProfile, type Employee, type EmployeeDraft, type EmployeeDocument, type LeaveRequest, type LeaveType, type SalaryAdvance } from './erp'
 
 export const USER_ROLES = [
   'Super Admin',
@@ -67,6 +67,17 @@ export const AUDIT_EVENT_TYPES = [
   'security.session_policy_updated',
   'security.authorization_denied',
   'company.profile_updated',
+  'leave.policy_updated',
+  'leave.routing_updated',
+  'leave.requested',
+  'leave.approved',
+  'leave.rejected',
+  'leave.cancelled',
+  'leave.amendment_requested',
+  'leave.amendment_approved',
+  'leave.amendment_rejected',
+  'leave.return_confirmed',
+  'leave.legacy_imported',
 ] as const
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number]
@@ -316,6 +327,490 @@ export function saveDailyAttendance(
     method: 'PUT',
     body: JSON.stringify({ entries }),
   })
+}
+
+export type LeavePolicy = {
+  workingDays: number[]
+  holidays: string[]
+  leaveYearStart: string
+  entitlements: Partial<Record<LeaveType, number>>
+  carryoverEnabled: boolean
+  carryoverLimit: number
+  reminderThresholds: {
+    pendingApprovalBusinessDays: number
+    beforeStartDays: number[]
+    onStartDate: boolean
+    returnFollowUp: boolean
+  }
+}
+
+export type LeaveRoutingEmployee = {
+  id: string
+  name: string
+  number: string
+  department: string
+  role: string
+  userId: string | null
+  supervisorUserId: string | null
+}
+
+export type LeaveRoutingUser = {
+  id: string
+  name: string
+  email: string
+  roles: UserRole[]
+}
+
+export type LeaveRequestInput = {
+  employeeId?: string
+  leaveType: LeaveType
+  otherLeaveType?: string
+  reason: string
+  startDate: string
+  endDate: string
+  handoverEmployeeId: string
+  handoverContact?: string
+}
+
+export type LegacyLeaveArchiveRecord = {
+  id: string
+  reference: string
+  employeeNumber: string
+  employeeName: string
+  department: string
+  role: string
+  leaveType: LeaveType
+  otherLeaveType: string
+  reason: string
+  startDate: string
+  endDate: string
+  requestedDays: number
+  handoverName: string
+  handoverContact: string
+  originalStatus: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled' | 'Unknown'
+  createdAt: string
+}
+
+export type LegacyLeaveImportPreview = {
+  records: Array<{
+    index: number
+    reference: string
+    employeeName?: string
+    originalStatus?: LegacyLeaveArchiveRecord['originalStatus']
+    employeeMatched: boolean
+    importable: boolean
+    duplicate: boolean
+    reason: string
+  }>
+  importableCount: number
+  duplicateCount: number
+}
+
+function legacyLeaveImportPayload(leaves: LeaveRequest[]) {
+  return leaves.map((leave) => ({
+    id: leave.id,
+    reference: leave.reference,
+    employeeNumber: leave.employeeNumber,
+    employeeName: leave.employeeName,
+    department: leave.department,
+    role: leave.role,
+    leaveType: leave.leaveType,
+    otherLeaveType: leave.otherLeaveType,
+    reason: leave.reason,
+    startDate: leave.startDate,
+    endDate: leave.endDate,
+    handoverName: leave.handoverName,
+    handoverContact: leave.handoverContact,
+    status: leave.status,
+    requestedAt: leave.requestedAt,
+  }))
+}
+
+export function listLegacyLeaveArchive() {
+  return request<{ records: LegacyLeaveArchiveRecord[] }>('/leave/legacy-archive')
+}
+
+export function previewLegacyLeaveRequests(leaves: LeaveRequest[]) {
+  return request<LegacyLeaveImportPreview>('/leave/legacy-import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ leaves: legacyLeaveImportPayload(leaves) }),
+  })
+}
+
+export function importLegacyLeaveRequests(leaves: LeaveRequest[]) {
+  return request<{
+    imported: LegacyLeaveArchiveRecord[]
+    skipped: Array<{ index: number; reference: string; reason: string }>
+  }>('/leave/legacy-import', {
+    method: 'POST',
+    body: JSON.stringify({ leaves: legacyLeaveImportPayload(leaves) }),
+  })
+}
+
+function normalizeLeaveRequest(request: LeaveRequest): LeaveRequest {
+  const raw = request as LeaveRequest & Record<string, unknown>
+  const decisions = (raw.decisions ?? []).map((entry) => {
+    const decision = entry as LeaveRequest['decisions'][number] & { actorId?: string; actorName?: string; _id?: string; id?: string }
+    return {
+      ...decision,
+      id: String(decision.id || decision._id || ''),
+      actor: decision.actorName || decision.actor || 'Administrator',
+      at: typeof decision.at === 'string' ? decision.at : new Date(String(decision.at)).toISOString(),
+    }
+  })
+  const employee = raw.employeeId && typeof raw.employeeId === 'object'
+    ? raw.employeeId as Employee & { _id?: string; phone?: string }
+    : undefined
+  const referenceId = (value: unknown) => value && typeof value === 'object'
+    ? String((value as { id?: string; _id?: string }).id || (value as { _id?: string })._id || '')
+    : String(value || '')
+  return {
+    ...request,
+    id: String(raw.id || raw._id || ''),
+    employeeId: String(employee?.id || employee?._id || referenceId(raw.employeeId)),
+    employeeName: String(raw.employeeName || employeeDisplayName(employee ?? {})),
+    employeeNumber: String(raw.employeeNumber || employee?.number || ''),
+    department: String(raw.department || employee?.department || ''),
+    role: String(raw.role || employee?.role || ''),
+    employeeContact: String(raw.employeeContact || employee?.phone || ''),
+    handoverEmployeeId: String(raw.handoverEmployeeId || ''),
+    handoverName: String(raw.handoverName || ''),
+    handoverContact: String(raw.handoverContact || ''),
+    requestedAt: String(raw.requestedAt || raw.createdAt || ''),
+    updatedAt: String(raw.updatedAt || raw.createdAt || ''),
+    requesterUserId: referenceId(raw.requesterUserId),
+    approverUserId: referenceId(raw.approverUserId),
+    decisions,
+    amendments: (raw.amendments ?? []).map((item) => {
+      const amendment = item as NonNullable<LeaveRequest['amendments']>[number] & { _id?: string; id?: string }
+      return { ...amendment, id: String(amendment.id || amendment._id || '') }
+    }),
+  }
+}
+
+export async function listLeaveRequests(filters: { status?: LeaveRequest['status'] } = {}) {
+  const query = filters.status ? `?status=${encodeURIComponent(filters.status)}` : ''
+  const result = await request<{ requests: LeaveRequest[] }>(`/leave${query}`)
+  return { requests: result.requests.map(normalizeLeaveRequest) }
+}
+
+export async function createLeaveRequest(input: LeaveRequestInput) {
+  const result = await request<{ request: LeaveRequest }>('/leave', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return normalizeLeaveRequest(result.request)
+}
+
+export async function decideLeaveRequest(id: string, input: { decision: 'Approved' | 'Rejected'; note?: string }) {
+  const result = await request<{ request: LeaveRequest }>(`/leave/${encodeURIComponent(id)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return normalizeLeaveRequest(result.request)
+}
+
+export async function cancelLeaveRequest(id: string, note: string) {
+  const result = await request<{ request: LeaveRequest }>(`/leave/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  })
+  return normalizeLeaveRequest(result.request)
+}
+
+export async function createLeaveAmendment(id: string, input: { startDate: string; endDate: string; reason: string }) {
+  const result = await request<{ request: LeaveRequest }>(`/leave/${encodeURIComponent(id)}/amendments`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return normalizeLeaveRequest(result.request)
+}
+
+export async function decideLeaveAmendment(id: string, amendmentId: string, input: { decision: 'Approved' | 'Rejected'; note?: string }) {
+  const result = await request<{ request: LeaveRequest }>(`/leave/${encodeURIComponent(id)}/amendments/${encodeURIComponent(amendmentId)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return normalizeLeaveRequest(result.request)
+}
+
+export async function confirmLeaveReturn(id: string, actualDate: string) {
+  const result = await request<{ request: LeaveRequest }>(`/leave/${encodeURIComponent(id)}/return-confirmation`, {
+    method: 'POST',
+    body: JSON.stringify({ actualDate }),
+  })
+  return normalizeLeaveRequest(result.request)
+}
+
+export async function getLeavePolicy() {
+  return request<{ policy: LeavePolicy }>('/leave/policy')
+}
+
+export async function updateLeavePolicy(policy: Partial<LeavePolicy>) {
+  return request<{ policy: LeavePolicy }>('/leave/policy', {
+    method: 'PUT',
+    body: JSON.stringify(policy),
+  })
+}
+
+export function listLeavePeople() {
+  return request<{ employees: LeaveRoutingEmployee[]; users: LeaveRoutingUser[] }>('/leave/people')
+}
+
+export function updateLeaveRouting(employeeId: string, input: { userId?: string | null; supervisorUserId?: string | null }) {
+  return request<{ employee: Pick<LeaveRoutingEmployee, 'id' | 'userId' | 'supervisorUserId'> }>(
+    `/leave/people/${encodeURIComponent(employeeId)}/routing`,
+    { method: 'PUT', body: JSON.stringify(input) },
+  )
+}
+
+export async function listLeaveBalances() {
+  return request<{ balances: Array<{
+    employeeId: string
+    employeeName: string
+    employeeNumber: string
+    department: string
+    leaveYear: { start: string; end: string }
+    byType: Record<LeaveType, { configured: boolean; entitlement: number | null; carryover: number; used: number; pending: number; available: number | null }>
+  }> }>('/leave/balances')
+}
+
+export async function listLeaveReminderCandidates() {
+  return request<{ candidates: Array<{ key: string; type: string; dueDate: string; requestId: string; recipientUserId: string }> }>('/leave/reminder-candidates')
+}
+
+export type DisciplinaryLetterType = 'Written warning' | 'Suspension' | 'Termination'
+export type DisciplinaryCaseStatus =
+  | 'Draft'
+  | 'Under investigation'
+  | 'Awaiting employee response'
+  | 'Pending Human Resource approval'
+  | 'Pending General Manager approval'
+  | 'Pending Super Admin approval'
+  | 'Changes requested'
+  | 'Approved'
+  | 'Issued'
+  | 'Closed'
+  | 'Rescinded'
+
+export type DisciplinaryApproverStage = 'Human Resource' | 'General Manager' | 'Super Admin'
+export type DisciplinaryApproverAssignments = {
+  humanResource: string
+  generalManager: string
+  superAdmin: string
+}
+
+export type DisciplinaryCase = {
+  id: string
+  reference: string
+  employeeId: string
+  employeeName: string
+  employeeNumber: string
+  department: string
+  role: string
+  type: DisciplinaryLetterType
+  status: DisciplinaryCaseStatus
+  incidentDate: string
+  allegation: string
+  reason?: string
+  expectations?: string
+  reviewDate?: string
+  suspensionStartDate?: string
+  suspensionEndDate?: string
+  returnDate?: string
+  suspensionPayStatus?: 'Paid' | 'Unpaid' | 'Not specified'
+  conditions?: string
+  effectiveDate?: string
+  noticeDetails?: string
+  handoverDetails?: string
+  signatory?: string
+  responseRequired: boolean
+  responseDueDate?: string
+  responseNotice?: string
+  response?: { text: string; submittedAt: string; submittedBy: string; source: 'Employee portal' | 'In person' | 'Written externally' }
+  responseHistory?: Array<{ text: string; submittedAt: string; submittedBy: string; source: 'Employee portal' | 'In person' | 'Written externally' }>
+  noResponseRecordedAt?: string
+  noResponseNote?: string
+  assignedApprovers?: DisciplinaryApproverAssignments
+  approvals?: Array<{ id: string; round: number; stage: DisciplinaryApproverStage; decision: 'Approved' | 'Rejected'; actorId: string; actorName: string; note: string; decidedAt: string }>
+  approvalRound?: number
+  evidence?: Array<{ id: string; name: string; mediaType: string; sizeBytes: number; uploadedBy: string; uploadedAt: string }>
+  acknowledgements?: Array<{ id: string; status: 'Received' | 'Declined' | 'Disputed'; note: string; actorId: string; recordedAt: string }>
+  appeals?: Array<{ id: string; text: string; submittedAt: string; resolution?: 'Upheld' | 'Varied' | 'Overturned'; resolutionNote?: string }>
+  issuedAt?: string
+  issuedLetterVersion?: number
+  letterVersion?: number
+  rescindReason?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type DisciplinaryCaseInput = {
+  employeeId: string
+  type: DisciplinaryLetterType
+  incidentDate: string
+  allegation: string
+  reason: string
+  expectations?: string
+  reviewDate?: string
+  suspensionStartDate?: string
+  suspensionEndDate?: string
+  returnDate?: string
+  suspensionPayStatus?: 'Paid' | 'Unpaid' | 'Not specified'
+  conditions?: string
+  effectiveDate?: string
+  noticeDetails?: string
+  handoverDetails?: string
+  signatory: string
+  responseRequired?: boolean
+  responseDueDate?: string
+  assignedApprovers: DisciplinaryApproverAssignments
+}
+
+export type DisciplinaryPolicy = {
+  responseRules: Record<DisciplinaryLetterType, { required: boolean; responseWindowDays: number }>
+}
+
+export type DisciplinaryIndicator = {
+  type: DisciplinaryLetterType
+  label: string
+  icon: 'flag-outline' | 'flag-filled' | 'user-x'
+  reference: string
+}
+
+export async function listDisciplinaryCases() {
+  return request<{ cases: DisciplinaryCase[] }>('/disciplinary-cases')
+}
+
+export async function listMyDisciplinaryCases() {
+  return request<{ cases: DisciplinaryCase[] }>('/disciplinary-cases/my-cases')
+}
+
+export async function getDisciplinaryCase(id: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}`)
+}
+
+export async function getDisciplinaryApproverCandidates() {
+  return request<{ candidates: Record<DisciplinaryApproverStage, Array<{ id: string; name: string; role: DisciplinaryApproverStage }>> }>('/disciplinary-cases/approvers')
+}
+
+export async function getDisciplinaryPolicy() {
+  return request<{ policy: DisciplinaryPolicy }>('/disciplinary-cases/policy')
+}
+
+export async function updateDisciplinaryPolicy(policy: DisciplinaryPolicy) {
+  return request<{ policy: DisciplinaryPolicy }>('/disciplinary-cases/policy', {
+    method: 'PUT',
+    body: JSON.stringify(policy),
+  })
+}
+
+export async function listDisciplinaryIndicators() {
+  return request<{ indicators: Record<string, DisciplinaryIndicator[]> }>('/disciplinary-cases/employee-indicators')
+}
+
+export async function createDisciplinaryCase(input: DisciplinaryCaseInput) {
+  return request<{ case: DisciplinaryCase }>('/disciplinary-cases', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateDisciplinaryCase(id: string, input: Partial<DisciplinaryCaseInput>) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function requestDisciplinaryResponse(id: string, responseNotice: string, responseDueDate: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/response-request`, {
+    method: 'POST',
+    body: JSON.stringify({ responseNotice, responseDueDate }),
+  })
+}
+
+export async function submitDisciplinaryEmployeeResponse(id: string, text: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/my-cases/${encodeURIComponent(id)}/responses`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+}
+
+export async function recordDisciplinaryOfflineResponse(id: string, text: string, source: 'In person' | 'Written externally') {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/response-record`, {
+    method: 'POST',
+    body: JSON.stringify({ text, source }),
+  })
+}
+
+export async function recordDisciplinaryNoResponse(id: string, note: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/no-response`, {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  })
+}
+
+export async function submitDisciplinaryCaseForApproval(id: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/submit`, { method: 'POST' })
+}
+
+export async function decideDisciplinaryApproval(id: string, decision: 'Approved' | 'Rejected', note = '') {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/approvals`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, note }),
+  })
+}
+
+export async function issueDisciplinaryCase(id: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/issue`, { method: 'POST' })
+}
+
+export async function acknowledgeDisciplinaryLetter(id: string, status: 'Received' | 'Declined' | 'Disputed', note = '') {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/my-cases/${encodeURIComponent(id)}/acknowledgements`, {
+    method: 'POST',
+    body: JSON.stringify({ status, note }),
+  })
+}
+
+export async function submitDisciplinaryAppeal(id: string, text: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/my-cases/${encodeURIComponent(id)}/appeals`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+}
+
+export async function resolveDisciplinaryAppeal(id: string, appealId: string, resolution: 'Upheld' | 'Varied' | 'Overturned', note: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/appeals/${encodeURIComponent(appealId)}/resolution`, {
+    method: 'POST',
+    body: JSON.stringify({ resolution, note }),
+  })
+}
+
+export async function rescindDisciplinaryCase(id: string, reason: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/rescind`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export async function uploadDisciplinaryEvidence(id: string, file: File) {
+  const body = new FormData()
+  body.set('file', file)
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/evidence`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export async function removeDisciplinaryEvidence(id: string, evidenceId: string) {
+  return request<{ case: DisciplinaryCase }>(`/disciplinary-cases/${encodeURIComponent(id)}/evidence/${encodeURIComponent(evidenceId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function getDisciplinaryEvidenceDownload(id: string, evidenceId: string) {
+  return request<{ url: string; expiresInSeconds: number }>(`/disciplinary-cases/${encodeURIComponent(id)}/evidence/${encodeURIComponent(evidenceId)}/download`)
 }
 
 function normalizeSalaryAdvance(advance: SalaryAdvance): SalaryAdvance {

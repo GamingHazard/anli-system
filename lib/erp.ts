@@ -43,6 +43,8 @@ export type EmployeeDocument = { id?: string; title: string; url: string; public
 export type EmployeeParent = { name: string; phone: string; address: string; status: 'Alive' | 'Deceased' | '' }
 export type Employee = {
   id: string
+  userId?: string | null
+  supervisorUserId?: string | null
   name: string
   number: string
   firstName?: string
@@ -101,7 +103,7 @@ export type AttendanceRecord = {
   note?: string
   updatedAt: string
 }
-export type LeaveType = 'Sick' | 'Maternity/Paternity' | 'Compassionate' | 'Other'
+export type LeaveType = 'Annual' | 'Sick' | 'Maternity/Paternity' | 'Compassionate' | 'Other'
 export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
 export type LeaveDecision = { id: string; decision: 'Approved' | 'Rejected' | 'Cancelled'; actor: string; at: string; note?: string }
 export type LeaveRequest = {
@@ -122,6 +124,23 @@ export type LeaveRequest = {
   handoverEmployeeId: string
   handoverName: string
   handoverContact: string
+  requesterUserId?: string
+  approverUserId?: string
+  handoverUserId?: string | null
+  returnConfirmation?: { expectedDate?: string; actualDate?: string; confirmedBy?: string; confirmedAt?: string }
+  amendments?: Array<{
+    id: string
+    startDate: string
+    endDate: string
+    requestedDays: number
+    reason: string
+    status: 'Pending' | 'Approved' | 'Rejected'
+    requestedBy: string
+    requestedAt: string
+    decidedBy?: string
+    decidedAt?: string
+    decisionNote?: string
+  }>
   status: LeaveStatus
   requestedAt: string
   updatedAt: string
@@ -437,6 +456,7 @@ const STORAGE_KEY = 'lumina-erp-demo-v1'
 const LEGACY_EMPLOYEE_IMPORT_KEY = 'lumina-erp-employee-import-v1'
 const LEGACY_ATTENDANCE_KEY = 'lumina-erp-attendance-archive-v1'
 const LEGACY_SALARY_ADVANCE_KEY = 'lumina-erp-salary-advance-archive-v1'
+const LEGACY_LEAVE_IMPORT_KEY = 'lumina-erp-leave-import-v1'
 const LEGACY_DEMO_EMPLOYEE_NUMBERS = new Set(['EMP-001', 'EMP-002', 'EMP-003', 'EMP-004', 'EMP-005'])
 const LEGACY_DEMO_EMPLOYEE_IDS = new Set(['E-001', 'E-002', 'E-003', 'E-004', 'E-005'])
 const preserveLegacyEmployeeData = (saved: string) => {
@@ -1224,7 +1244,29 @@ const normalizeLeaveRequests = (value: unknown): LeaveRequest[] => {
         updatedAt: typeof request.updatedAt === 'string' ? request.updatedAt : createdAt,
         decisions,
       }
+
     }).filter((request) => request.employeeId && /^\d{4}-\d{2}-\d{2}$/.test(request.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(request.endDate))
+}
+
+export const preserveLegacyLeaveRequests = (requests: LeaveRequest[]) => {
+  if (typeof window === 'undefined' || !requests.length || window.localStorage.getItem(LEGACY_LEAVE_IMPORT_KEY)) return
+  window.localStorage.setItem(LEGACY_LEAVE_IMPORT_KEY, JSON.stringify(requests))
+}
+
+export const getLegacyLeaveRequests = (): LeaveRequest[] => {
+  if (typeof window === 'undefined') return []
+  try {
+    const saved = window.localStorage.getItem(LEGACY_LEAVE_IMPORT_KEY)
+    if (!saved) return []
+    return normalizeLeaveRequests(JSON.parse(saved))
+  } catch {
+    console.error('Could not read the preserved browser leave snapshot.')
+    return []
+  }
+}
+
+export const clearLegacyLeaveRequests = () => {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_LEAVE_IMPORT_KEY)
 }
 
 export const employeeDisplayName = (employee: Partial<Employee>) => {
@@ -1275,7 +1317,7 @@ export const saveState = (state: ErpState) => {
   }
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
 }
-export const clearState = () => { if (typeof window !== 'undefined') { window.localStorage.removeItem(STORAGE_KEY); window.localStorage.removeItem(LEGACY_EMPLOYEE_IMPORT_KEY); window.localStorage.removeItem(LEGACY_ATTENDANCE_KEY); window.localStorage.removeItem(LEGACY_SALARY_ADVANCE_KEY) } }
+export const clearState = () => { if (typeof window !== 'undefined') { window.localStorage.removeItem(STORAGE_KEY); window.localStorage.removeItem(LEGACY_EMPLOYEE_IMPORT_KEY); window.localStorage.removeItem(LEGACY_ATTENDANCE_KEY); window.localStorage.removeItem(LEGACY_SALARY_ADVANCE_KEY); window.localStorage.removeItem(LEGACY_LEAVE_IMPORT_KEY) } }
 export const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
 export const exportCsv = (filename: string, rows: Record<string, unknown>[]) => { if (!rows.length) return; const headers = Object.keys(rows[0]); const csv = [headers.join(','), ...rows.map(row => headers.map(header => JSON.stringify(row[header] ?? '')).join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url) }
 export const navGroups = [

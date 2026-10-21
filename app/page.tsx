@@ -58,6 +58,11 @@ import {
   useAttendanceYear,
   useSaveDailyAttendance,
 } from "@/lib/attendance-queries";
+import { useLeaveRequests } from "@/lib/leave-queries";
+import {
+  useDisciplinaryCases,
+  useDisciplinaryIndicators,
+} from "@/lib/disciplinary-queries";
 import { useSalaryAdvances } from "@/lib/salary-advance-queries";
 import {
   balanceForSale,
@@ -117,6 +122,7 @@ import {
   signIn,
   signOut,
   type PublicCompanyBrand,
+  type DisciplinaryIndicator,
   type UserAccount,
 } from "@/lib/user-api";
 
@@ -1201,6 +1207,9 @@ function App() {
                       "Human Resource",
                       "General Manager",
                     ].includes(role),
+                  )}
+                  canReadDisciplinary={currentUser.roles.some((role) =>
+                    ["Human Resource", "General Manager", "Super Admin"].includes(role),
                   )}
                   onEmployeeUpdated={(employee) =>
                     setState((current) => ({
@@ -2369,6 +2378,7 @@ function EmployeeDetails({
   updateState,
   canManage,
   canReadAdvances,
+  canReadDisciplinary,
   onEmployeeUpdated,
   onBack,
   onViewPayrollRun,
@@ -2379,6 +2389,7 @@ function EmployeeDetails({
   updateState: (next: ErpState) => void;
   canManage: boolean;
   canReadAdvances: boolean;
+  canReadDisciplinary: boolean;
   onEmployeeUpdated: (employee: Employee) => void;
   onBack: () => void;
   onViewPayrollRun: (id: string) => void;
@@ -2391,6 +2402,7 @@ function EmployeeDetails({
       updateState={updateState}
       canManage={canManage}
       canReadAdvances={canReadAdvances}
+      canReadDisciplinary={canReadDisciplinary}
       onEmployeeUpdated={onEmployeeUpdated}
       onBack={onBack}
       onViewPayrollRun={onViewPayrollRun}
@@ -2454,6 +2466,11 @@ function EmployeeDirectory({
   const canManage = currentUser.roles.some((role) =>
     ["Super Admin", "Admin", "Human Resource"].includes(role),
   );
+  const canReadDisciplinary = currentUser.roles.some((role) =>
+    ["Human Resource", "General Manager", "Super Admin"].includes(role),
+  );
+  const disciplinaryIndicatorsQuery =
+    useDisciplinaryIndicators(canReadDisciplinary);
   const canRead = canManage || currentUser.roles.includes("General Manager");
   const [legacyImport, setLegacyImport] = useState(() =>
     getLegacyEmployeeImport(),
@@ -2935,6 +2952,9 @@ function EmployeeDirectory({
                             {employee.number}
                           </span>
                         </span>
+                        {disciplinaryIndicatorsQuery.data?.indicators[employee.id]?.map((indicator) => (
+                          <DisciplinaryIndicatorBadge key={`${indicator.reference}-${indicator.icon}`} indicator={indicator} />
+                        ))}
                       </button>
                     </td>
                     <td className="px-4 py-3">{employee.department}</td>
@@ -3023,6 +3043,28 @@ function EmployeeAvatar({
     >
       {initials(employeeDisplayName(employee))}
     </div>
+  );
+}
+
+function DisciplinaryIndicatorBadge({
+  indicator,
+}: {
+  indicator: DisciplinaryIndicator;
+}) {
+  const icon = indicator.icon === "user-x"
+    ? <Icons.UserRoundX className="size-4 text-rose-700" aria-hidden="true" />
+    : <Icons.Flag
+        className={`size-4 text-rose-700 ${indicator.icon === "flag-filled" ? "fill-rose-600" : ""}`}
+        aria-hidden="true"
+      />;
+  return (
+    <span
+      title={`${indicator.label} · ${indicator.reference}`}
+      aria-label={`${indicator.label}, reference ${indicator.reference}`}
+      className="inline-flex shrink-0 items-center"
+    >
+      {icon}
+    </span>
   );
 }
 
@@ -3844,6 +3886,7 @@ function EmployeeProfile({
   updateState,
   canManage,
   canReadAdvances,
+  canReadDisciplinary,
   onEmployeeUpdated,
   onBack,
   onViewPayrollRun,
@@ -3854,11 +3897,15 @@ function EmployeeProfile({
   updateState: (next: ErpState) => void;
   canManage: boolean;
   canReadAdvances: boolean;
+  canReadDisciplinary: boolean;
   onEmployeeUpdated: (employee: Employee) => void;
   onBack: () => void;
   onViewPayrollRun: (id: string) => void;
   onViewAdvance: (id: string) => void;
 }) {
+  const leaveQuery = useLeaveRequests();
+  const disciplinaryIndicatorsQuery =
+    useDisciplinaryIndicators(canReadDisciplinary);
   const [activeTab, setActiveTab] = useState<EmployeeProfileTab>("overview");
   const [showEdit, setShowEdit] = useState(false);
   const [selectedAttendanceRecord, setSelectedAttendanceRecord] =
@@ -3877,6 +3924,9 @@ function EmployeeProfile({
   const employeeSalaryAdvancesQuery = useSalaryAdvances(
     employee.id,
     activeTab === "advances" && canReadAdvances,
+  );
+  const employeeDisciplinaryCasesQuery = useDisciplinaryCases(
+    activeTab === "punishment" && canReadDisciplinary,
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [imageError, setImageError] = useState("");
@@ -3906,8 +3956,10 @@ function EmployeeProfile({
     { id: "punishment", label: "Punishment history" },
   ];
   const tabs = canManage
-    ? allTabs
-    : allTabs.filter((tab) => tab.id === "overview");
+    ? allTabs.filter((tab) => tab.id !== "punishment" || canReadDisciplinary)
+    : canReadDisciplinary
+      ? allTabs.filter((tab) => ["overview", "punishment"].includes(tab.id))
+      : allTabs.filter((tab) => tab.id === "overview");
   const displayName = employeeDisplayName(employee);
   const saveProfileImage = async (file: File) => {
     setImageError("");
@@ -4907,7 +4959,7 @@ function EmployeeProfile({
       );
     }
     if (activeTab === "leave") {
-      const employeeLeave = state.leaveRequests
+      const employeeLeave = (leaveQuery.data?.requests ?? [])
         .filter((request) => request.employeeId === employee.id)
         .sort((left, right) => right.startDate.localeCompare(left.startDate));
       return (
@@ -4973,6 +5025,57 @@ function EmployeeProfile({
         </section>
       );
     }
+    if (activeTab === "punishment" && canReadDisciplinary) {
+      const employeeCases = (employeeDisciplinaryCasesQuery.data?.cases ?? [])
+        .filter((caseRecord) => caseRecord.employeeId === employee.id)
+        .sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
+      return (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h3 className="text-sm font-bold">Disciplinary history</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Confidential case outcomes visible only to authorized disciplinary readers.
+            </p>
+          </div>
+          {employeeDisciplinaryCasesQuery.isError ? (
+            <p role="alert" className="p-5 text-sm text-rose-700">
+              Could not load disciplinary history.
+            </p>
+          ) : employeeDisciplinaryCasesQuery.isLoading ? (
+            <p role="status" className="p-5 text-sm text-slate-500">
+              Loading disciplinary history…
+            </p>
+          ) : employeeCases.length ? (
+            <div className="divide-y divide-slate-100">
+              {employeeCases.map((caseRecord) => (
+                <article key={caseRecord.id} className="p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-xs text-slate-800">
+                      {caseRecord.reference} · {caseRecord.type}
+                    </strong>
+                    <Status text={caseRecord.status} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Incident date: {caseRecord.incidentDate}
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">
+                    {caseRecord.allegation}
+                  </p>
+                  {["Issued", "Closed", "Rescinded"].includes(caseRecord.status) &&
+                    caseRecord.reason && (
+                      <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">
+                        <strong>Issued reason:</strong> {caseRecord.reason}
+                      </p>
+                    )}
+                </article>
+              ))}
+            </div>
+          ) : (
+            emptyHistory("Disciplinary history")
+          )}
+        </section>
+      );
+    }
     const historyNames: Partial<Record<EmployeeProfileTab, string>> = {
       attendance: "Attendance",
       payroll: "Payroll history",
@@ -5024,6 +5127,16 @@ function EmployeeProfile({
           <h2 className="mt-1 truncate text-xl font-bold tracking-tight text-slate-900">
             {displayName}
           </h2>
+          {disciplinaryIndicatorsQuery.data?.indicators[employee.id]?.length ? (
+            <div className="mt-2 flex flex-wrap gap-2" aria-label="Disciplinary indicators">
+              {disciplinaryIndicatorsQuery.data.indicators[employee.id].map((indicator) => (
+                <span key={`${indicator.reference}-${indicator.icon}`} className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-800">
+                  <DisciplinaryIndicatorBadge indicator={indicator} />
+                  {indicator.label}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <span>{employee.department}</span>
             <span>·</span>
@@ -8230,6 +8343,7 @@ function ModulePage({
       <LeaveManagement
         state={state}
         updateState={updateState}
+        currentUser={currentUser}
         onViewEmployee={(id) =>
           window.dispatchEvent(
             new CustomEvent("erp:view", { detail: { type: "employee", id } }),
@@ -8239,7 +8353,7 @@ function ModulePage({
     );
   }
   if (active === "Disciplinary Letters") {
-    return <DisciplinaryLettersPage state={state} />;
+    return <DisciplinaryLettersPage state={state} currentUser={currentUser} />;
   }
   if (active === "Customer Management") {
     return (
