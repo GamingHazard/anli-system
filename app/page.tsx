@@ -8046,9 +8046,9 @@ function ModulePage({
   if (active === "Expenses")
     return <ExpenseManagement state={state} updateState={updateState} />;
   if (active === "Raw Material Management")
-    return <RawMaterialManagement state={state} updateState={updateState} />;
+    return <RawMaterialManagement />;
   if (active === "Production Management")
-    return <ProductionManagement state={state} updateState={updateState} />;
+    return <ProductionManagement />;
   if (active === "Assets Management")
     return <AssetManagement state={state} updateState={updateState} />;
   if (active === "Data Backup") return <DataBackup />;

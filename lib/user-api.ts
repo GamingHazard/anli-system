@@ -168,6 +168,321 @@ export function removeCompanyLogo() {
   return request<{ logo: CompanyLogo }>('/profile-settings/logo', { method: 'DELETE' })
 }
 
+export type ProductionIngredient = {
+  materialId: string
+  materialName: string
+  unit: string
+  quantityPerTank: number
+}
+
+export type ProductionRecipe = {
+  id: string
+  productId: string
+  version: number
+  ingredients: ProductionIngredient[]
+}
+
+export type ProductionProduct = {
+  id: string
+  code: string
+  name: string
+  category: 'Cup' | 'Bottle'
+  unit: string
+  flavour: 'Mango' | 'Pineapple milk'
+  packType?: 'Box' | 'Carton'
+  piecesPerPack?: number
+  packWeightKg?: number
+  recipeRequired: boolean
+  active: boolean
+  balancePieces: number
+  recipe: ProductionRecipe | null
+  activeRecipeId?: string | null
+  createdAt: string
+}
+
+export type ProductionMaterial = {
+  id: string
+  code: string
+  name: string
+  category: string
+  unit: string
+  active: boolean
+  balance: number
+  locations: RawMaterialLocationBalance[]
+}
+
+export type RawMaterialLocationBalance = {
+  id?: string
+  location: string
+  quantity: number
+  reorderThreshold: number
+  responsibleUserId: string | null
+  responsibleUserName?: string | null
+  responsibleUserActive?: boolean
+}
+
+export type RawMaterialMovementType = 'Opening balance' | 'Receipt' | 'Stock in' | 'Stock out' | 'Production use' | 'Transfer' | 'Adjustment increase' | 'Adjustment decrease'
+
+export type RawMovementRecord = {
+  id: string
+  materialId: string
+  type: RawMaterialMovementType
+  direction: 'in' | 'out' | 'transfer'
+  quantity: number
+  unit: string
+  date: string
+  reference: string
+  receiptReference?: string
+  reason?: string
+  materialName: string
+  fromLocation?: string
+  toLocation?: string
+  supplier?: string
+  sourceReference?: string
+  unitCost?: number
+  actor: string
+  createdAt: string
+}
+
+export type RawMaterialAlert = {
+  id: string
+  materialId: { id: string; code: string; name: string; unit: string; category: string } | string
+  location: string
+  recipientUserId?: { id: string; name: string; email: string } | string | null
+  reorderThreshold: number
+  currentQuantity: number
+  status: 'active' | 'resolved'
+  lastTriggeredAt?: string
+  updatedAt: string
+}
+
+export type InventoryResponsibleUser = {
+  id: string
+  name: string
+  email: string
+  roles: string[]
+}
+
+export type ProductionMaterialUsageRecord = {
+  id: string
+  reference: string
+  productionRunId: string
+  productId: string
+  productName: string
+  productionDate: string
+  tanksProduced: number
+  tankVolumeLitres: 1000
+  location: string
+  recipeId: string
+  recipeVersion: number
+  lines: Array<ProductionIngredient & { totalQuantity: number }>
+  actor: string
+  createdAt: string
+}
+
+export type ProductionRunRecord = {
+  id: string
+  reference: string
+  productId: string
+  productName: string
+  productUnit: string
+  recipeId?: string | null
+  recipeVersion?: number | null
+  productionDate: string
+  openingStockPieces: number
+  salesQuantityPieces: number
+  damagedQuantityPieces: number
+  closingStockPieces: number
+  producedQuantityPieces: number
+  damageReason?: string
+  lines: Array<ProductionIngredient & { totalQuantity: number }>
+  createdAt: string
+}
+
+export type FinishedMovementRecord = {
+  id: string
+  productId: string
+  type: string
+  direction: 'in' | 'out'
+  quantityPieces: number
+  date: string
+  reference: string
+  reason: string
+  productName: string
+  createdAt: string
+}
+
+type ProductInput = {
+  code: string
+  name: string
+  category: 'Cup' | 'Bottle'
+  unit: string
+  flavour: 'Mango' | 'Pineapple milk'
+  packType?: 'Box' | 'Carton'
+  piecesPerPack?: number
+  packWeightKg?: number
+  recipeRequired: boolean
+  ingredients?: Array<{
+    materialId: string
+    quantityPerTank: number
+  }>
+}
+
+export async function listProductionProducts() {
+  return request<{ products: ProductionProduct[] }>('/production/products')
+}
+
+export async function createProductionProduct(input: ProductInput) {
+  return request<{ product: ProductionProduct }>('/production/products', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateProductionProduct(id: string, input: Omit<Partial<ProductInput>, 'packType' | 'piecesPerPack' | 'packWeightKg'> & {
+  packType?: '' | 'Box' | 'Carton'
+  piecesPerPack?: number | null
+  packWeightKg?: number | null
+  active?: boolean
+}) {
+  return request<{ product: ProductionProduct }>(`/production/products/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateProductionRecipe(id: string, ingredients: NonNullable<ProductInput['ingredients']>) {
+  return request<{ recipe: ProductionRecipe }>(`/production/products/${encodeURIComponent(id)}/recipe`, {
+    method: 'PUT',
+    body: JSON.stringify({ ingredients }),
+  })
+}
+
+export async function listProductionMaterials() {
+  return listRawMaterials()
+}
+
+export async function listRawMaterials() {
+  return request<{ materials: ProductionMaterial[] }>('/production/materials')
+}
+
+export async function listInventoryResponsibleUsers() {
+  return request<{ users: InventoryResponsibleUser[] }>('/production/materials/responsible-users')
+}
+
+export async function createProductionMaterial(input: { code: string; name: string; category: string; unit: string }) {
+  return request<{ material: ProductionMaterial }>('/production/materials', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function configureRawMaterialLocation(id: string, location: string, input: { reorderThreshold: number; responsibleUserId: string | null }) {
+  return request<{ location: RawMaterialLocationBalance; responsibleUser: { id: string; name: string } | null }>(`/production/materials/${encodeURIComponent(id)}/locations/${encodeURIComponent(location)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function receiveProductionMaterial(id: string, input: { quantity: number; date: string; reference?: string; reason: string; location: string; supplier?: string; sourceReference?: string; unitCost?: number; idempotencyKey: string }) {
+  return request<{ balance: number; movement: RawMovementRecord }>(`/production/materials/${encodeURIComponent(id)}/receipts`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function adjustRawMaterialStock(input: { materialId: string; location: string; direction: 'in' | 'out'; quantity: number; date: string; reference?: string; reason: string; idempotencyKey: string }) {
+  return request<{ balance: number; movement: RawMovementRecord }>('/production/materials/adjustments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function transferRawMaterialStock(input: { materialId: string; fromLocation: string; toLocation: string; quantity: number; date: string; reference?: string; reason: string; idempotencyKey: string }) {
+  return request<{ balance: number; movement: RawMovementRecord }>('/production/materials/transfers', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function listProductionMaterialMovements(filters: { materialId?: string; location?: string; type?: string; from?: string; to?: string } = {}) {
+  const params = new URLSearchParams({ limit: '200' })
+  Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value) })
+  return request<{ movements: RawMovementRecord[] }>(`/production/materials/movements?${params.toString()}`)
+}
+
+export async function listProductionMaterialReceipts() {
+  return request<{ movements: RawMovementRecord[] }>('/production/materials/receipts?limit=200')
+}
+
+export async function listRawMaterialAlerts() {
+  return request<{ alerts: RawMaterialAlert[] }>('/production/materials/low-stock?limit=200')
+}
+
+export async function listProductionMaterialUsages() {
+  return request<{ usages: ProductionMaterialUsageRecord[] }>('/production/materials/production-usages?limit=200')
+}
+
+export async function postProductionMaterialUsage(input: { productionRunId: string; tanksProduced: number; location: string; idempotencyKey: string }) {
+  return request<{ usage: ProductionMaterialUsageRecord; replayed?: boolean }>('/production/materials/production-usages', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function listProductionRuns() {
+  return request<{ runs: ProductionRunRecord[] }>('/production/runs?limit=200')
+}
+
+export async function postProductionRun(input: {
+  productId: string
+  productionDate: string
+  openingStockPieces: number
+  salesQuantityPieces: number
+  damagedQuantityPieces: number
+  closingStockPieces: number
+  damageReason?: string
+  idempotencyKey: string
+}) {
+  return request<{ run: ProductionRunRecord; balancePieces: number }>('/production/runs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function listFinishedStockMovements() {
+  return request<{ movements: FinishedMovementRecord[] }>('/production/stock/finished/movements?limit=200')
+}
+
+export async function receiveFinishedStock(input: {
+  productId: string
+  quantityPieces: number
+  date: string
+  reason: string
+  reference?: string
+  idempotencyKey: string
+}) {
+  return request<{ balancePieces: number; movement: FinishedMovementRecord }>('/production/stock/finished/receipts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function adjustFinishedStock(input: {
+  productId: string
+  direction: 'in' | 'out'
+  quantityPieces: number
+  date: string
+  reason: string
+  reference?: string
+  idempotencyKey: string
+}) {
+  return request<{ balancePieces: number; movement: FinishedMovementRecord }>('/production/stock/finished/adjustments', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 export type EmployeeDraftRecord = {
   id: string
   employee: Partial<Employee>

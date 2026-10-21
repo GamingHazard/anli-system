@@ -260,7 +260,7 @@ export type RecipeIngredient = { materialId: string; quantityPerTank: number }
 export type ProductionRecipe = { id: string; productName: string; tankUnit: string; ingredients: RecipeIngredient[]; createdAt: string; updatedAt: string }
 export type ProductionRunLine = { materialId: string; materialName: string; quantityPerTank: number; totalQuantity: number; unit: string }
 export type ProductionRun = { id: string; reference: string; recipeId: string; productId?: string; productName: string; productUnit?: string; productionDate: string; tankCount: number; producedQuantity?: number; openingStock?: number; salesQuantity?: number; damagedQuantity?: number; closingStock?: number; damageReason?: string; salesSource: 'Manual'; location: string; lines: ProductionRunLine[]; recordedAt: string; actor: string }
-export type FinishedProduct = { id: string; code: string; name: string; category: string; unit: string; flavour?: 'Mango' | 'Pineapple milk'; recipeId?: string; recipeRequired: boolean; active: boolean; createdAt: string; updatedAt: string }
+export type FinishedProduct = { id: string; code: string; name: string; category: string; unit: string; flavour?: 'Mango' | 'Pineapple milk'; packType?: 'Box' | 'Carton'; piecesPerPack?: number; packWeightKg?: number; recipeId?: string; recipeRequired: boolean; active: boolean; createdAt: string; updatedAt: string }
 export type FinishedStockMovementType = 'Opening balance' | 'Production' | 'Sales dispatch' | 'Damage/write-off' | 'Internal use/sample' | 'Transfer in' | 'Transfer out' | 'Other stock in' | 'Adjustment increase' | 'Adjustment decrease'
 export type FinishedStockMovement = { id: string; reference: string; productId: string; type: FinishedStockMovementType; quantity: number; date: string; recordedAt: string; reason?: string; note?: string; actor: string }
 export type AssetCategory = 'Office assets' | 'Vehicles' | 'Production assets' | 'Store' | 'Machinery' | 'Others'
@@ -661,6 +661,9 @@ const normalizeFinishedProducts = (value: unknown): FinishedProduct[] => {
         category: String(product.category || 'Finished goods'),
         unit: String(product.unit || 'unit'),
         flavour: product.flavour === 'Mango' ? 'Mango' as const : product.flavour === 'Pineapple milk' ? 'Pineapple milk' as const : undefined,
+        packType: (product.packType === 'Box' ? 'Box' : product.packType === 'Carton' ? 'Carton' : undefined) as FinishedProduct['packType'],
+        piecesPerPack: Number.isInteger(Number(product.piecesPerPack)) && Number(product.piecesPerPack) > 0 ? Number(product.piecesPerPack) : undefined,
+        packWeightKg: Number.isFinite(Number(product.packWeightKg)) && Number(product.packWeightKg) > 0 ? Number(product.packWeightKg) : undefined,
         recipeId: typeof product.recipeId === 'string' ? product.recipeId : undefined,
         recipeRequired: Boolean(product.recipeRequired),
         active: product.active !== false,
@@ -1029,6 +1032,28 @@ export const loadState = (): ErpState => {
     return state
   } catch {
     return linkCustomerTransactions(cloneSeed())
+  }
+}
+
+export const exportLegacyRawMaterialMigration = () => {
+  if (typeof window === 'undefined') throw new Error('Legacy inventory export is only available in a browser.')
+  const saved = window.localStorage.getItem(STORAGE_KEY)
+  if (!saved) throw new Error('No legacy browser inventory data was found.')
+  const parsed = JSON.parse(saved) as Partial<ErpState>
+  const legacyMaterials = Array.isArray(parsed.materials) ? parsed.materials as RawMaterial[] : []
+  const stockMovements = Array.isArray(parsed.stockMovements)
+    ? normalizeStockMovements(parsed.stockMovements)
+    : openingMovementsFor(legacyMaterials)
+  return {
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    materials: legacyMaterials.map((material) => ({
+      ...material,
+      quantity: Math.max(0, stockQuantityAtLocation(material.id, stockMovements)),
+    })),
+    stockMovements,
+    productionRecipes: normalizeProductionRecipes(parsed.productionRecipes),
+    productionRuns: normalizeProductionRuns(parsed.productionRuns),
   }
 }
 
