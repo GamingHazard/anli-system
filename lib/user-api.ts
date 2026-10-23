@@ -1,6 +1,7 @@
 import { createId, employeeDisplayName, type AdvanceRepaymentMethod, type AdvanceRepaymentFrequency, type AssetEvent, type AssetCategory, type AssetCondition, type AssetStatus, type AttendanceRecord, type AttendanceStatus, type CompanyAsset, type CompanyProfile, type Customer, type Employee, type EmployeeDraft, type EmployeeDocument, type LeaveRequest, type LeaveType, type ManagedReceipt, type Order, type OrderStatus, type ReceiptStats, type Sale, type SaleLine, type SalePayment, type SalePartySnapshot, type SaleCompanySnapshot, type SalaryAdvance } from './erp'
 import type { PayrollPolicy, PayrollRun, PayrollRunType } from './payroll'
 import type { CreateExpenseInput, ExpenseEvent, ExpenseFilters, ExpenseRecord, ManualExpense } from './expenses'
+import type { ApprovalInboxResponse } from './approval-inbox'
 
 export const USER_ROLES = [
   'Super Admin',
@@ -1553,6 +1554,10 @@ function normalizeLeaveRequest(request: LeaveRequest): LeaveRequest {
       return { ...amendment, id: String(amendment.id || amendment._id || '') }
     }),
   }
+}
+
+export function getApprovalInbox() {
+  return request<ApprovalInboxResponse>('/approvals')
 }
 
 export async function listLeaveRequests(filters: { status?: LeaveRequest['status'] } = {}) {

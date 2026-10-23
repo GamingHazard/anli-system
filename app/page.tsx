@@ -8472,7 +8472,6 @@ function ModulePage({
   if (active === "Approvals")
     return (
       <Approvals
-        state={state}
         currentUser={currentUser}
         onViewSalaryAdvance={onViewSalaryAdvance}
         onViewPayrollRun={onViewPayrollRun}
