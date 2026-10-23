@@ -14,6 +14,7 @@ import {
   useUploadSalaryAdvanceAttachment,
 } from '@/lib/salary-advance-queries'
 import { getSalaryAdvanceAttachmentDownload, importLegacySalaryAdvances, previewLegacySalaryAdvances, type LegacySalaryAdvanceImportPreview, type LegacySalaryAdvanceImportRecord, type UserAccount } from '@/lib/user-api'
+import { hasDepartmentRole } from '@/lib/authorization'
 
 type Props = { state: ErpState; initialAdvanceId?: string | null; currentUser: UserAccount; onViewEmployee: (id: string) => void }
 type View = 'Requests' | 'Active advances' | 'Repayment history' | 'All records'
@@ -137,10 +138,10 @@ export default function SalaryAdvanceManagement({ state, initialAdvanceId = null
   const activeAdvances = records.filter((advance) => advance.status === 'Active')
   const pending = records.filter((advance) => advance.status === 'Pending HR review' || advance.status === 'Pending GM review' || advance.status === 'Pending review')
   const approved = records.filter((advance) => advance.status === 'Approved')
-  const canRequest = currentUser.roles.includes('Human Resource')
-  const canHrApprove = currentUser.roles.includes('Human Resource')
-  const canGmApprove = currentUser.roles.includes('General Manager')
-  const canManagePayments = currentUser.roles.includes('Human Resource')
+  const canRequest = hasDepartmentRole(currentUser.roles, 'Human Resource')
+  const canHrApprove = hasDepartmentRole(currentUser.roles, 'Human Resource')
+  const canGmApprove = hasDepartmentRole(currentUser.roles, 'General Manager')
+  const canManagePayments = hasDepartmentRole(currentUser.roles, 'Human Resource')
   const createMutation = useCreateSalaryAdvance()
   const hrDecisionMutation = useHrSalaryAdvanceDecision()
   const gmDecisionMutation = useGeneralManagerSalaryAdvanceDecision()
@@ -372,10 +373,10 @@ function AdvanceDetails({ advance, currentUser, error, onRemoveAttachment, onOpe
   const currentBalance = balance(advance)
   const progress = advance.disbursement?.amount ? Math.min(100, (repaidAmount(advance) / advance.disbursement.amount) * 100) : 0
   const nextDue = advance.schedule.find((entry) => entry.dueDate >= today())
-  const canReviewHr = currentUser.roles.includes('Human Resource') && advance.status === 'Pending HR review'
-  const canReviewGm = currentUser.roles.includes('General Manager') && advance.status === 'Pending GM review'
-  const canEditPayments = currentUser.roles.includes('Human Resource')
-  const canEditAttachments = currentUser.roles.includes('Human Resource') && ['Pending HR review', 'Pending GM review'].includes(advance.status)
+  const canReviewHr = hasDepartmentRole(currentUser.roles, 'Human Resource') && advance.status === 'Pending HR review'
+  const canReviewGm = hasDepartmentRole(currentUser.roles, 'General Manager') && advance.status === 'Pending GM review'
+  const canEditPayments = hasDepartmentRole(currentUser.roles, 'Human Resource')
+  const canEditAttachments = hasDepartmentRole(currentUser.roles, 'Human Resource') && ['Pending HR review', 'Pending GM review'].includes(advance.status)
   return <div className="animate-in fade-in duration-200">
     <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 text-xs font-semibold text-[#6d28d9] hover:underline"><Icons.ArrowLeft className="size-4" /> Back to advances</button>
     <header className="mb-5 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 lg:flex-row lg:items-center"><div className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#f1eafd] text-[#6d28d9]"><Icons.HandCoins className="size-5" /></div><div className="min-w-0 flex-1"><div className="text-xs text-slate-400">Salary advance · {advance.legacyReference || advance.reference}</div><h2 className="mt-1 text-xl font-bold text-slate-900">{advance.employeeName}</h2><div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500"><span>{advance.employeeNumber}</span><span>·</span><span>{advance.department}</span><span>·</span><span>{advance.role}</span><span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone(advance.status)}`}>{advance.status}</span>{advance.legacyUnverified && <span className="rounded-md bg-orange-50 px-2 py-1 text-[10px] font-semibold text-orange-700">Imported legacy record · original status: {advance.legacyStatus || 'Unknown'}</span>}</div></div><div className="flex flex-wrap gap-2"><button type="button" onClick={onExport} disabled={!advance.repayments.length} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"><Icons.Download className="size-4" /> Repayments CSV</button>{advance.employeeId && <button type="button" onClick={() => onViewEmployee(advance.employeeId)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Icons.UserRound className="size-4" /> Employee profile</button>}{(canReviewHr || canReviewGm) && <button type="button" onClick={() => onAction('review')} className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6]"><Icons.ClipboardCheck className="size-4" /> {canReviewHr ? 'HR review' : 'Finalize approval'}</button>}{canEditPayments && advance.status === 'Approved' && !advance.disbursement && <button type="button" onClick={() => onAction('disbursement')} className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6]"><Icons.Banknote className="size-4" /> Record disbursement</button>}{canEditPayments && advance.status === 'Active' && <button type="button" onClick={() => onAction('repayment')} className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700"><Icons.CircleDollarSign className="size-4" /> Record repayment</button>}</div></header>

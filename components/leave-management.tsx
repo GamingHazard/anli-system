@@ -6,6 +6,7 @@ import { employeeDisplayName, formatDate, getLegacyLeaveRequests, preserveLegacy
 import type { LeavePolicy, LeaveRequestInput, LeaveRoutingEmployee, LeaveRoutingUser, UserAccount, LegacyLeaveImportPreview } from '@/lib/user-api'
 import { useConfirmLeaveReturn, useCreateLeaveAmendment, useCreateLeaveRequest, useImportLegacyLeaveRequests, useLeaveAmendmentDecision, useLeaveBalances, useLeaveDecision, useLeavePeople, useLeavePolicy, useLeaveRequests, useLeaveCancellation, useLegacyLeaveArchive, usePreviewLegacyLeaveRequests, useUpdateLeavePolicy, useUpdateLeaveRouting } from '@/lib/leave-queries'
 import { calculateWorkingDays, validateLeaveRequest } from '@/lib/leave'
+import { hasAnyDepartmentRole } from '@/lib/authorization'
 
 type Props = { state: ErpState; updateState: (next: ErpState) => void; currentUser: UserAccount; onViewEmployee: (id: string) => void }
 type View = 'Requests' | 'Team calendar' | 'Balances' | 'Policy' | 'Routing'
@@ -28,9 +29,9 @@ export default function LeaveManagement({ state, updateState, currentUser, onVie
   const preservedLegacySnapshot = useRef(false)
   const requestQuery = useLeaveRequests()
   const policyQuery = useLeavePolicy()
-  const isAdmin = currentUser.roles.some((role) => ['Human Resource', 'Admin', 'Super Admin'].includes(role))
+  const isAdmin = hasAnyDepartmentRole(currentUser.roles, ['Human Resource', 'Admin'])
   const isSuperAdmin = currentUser.roles.includes('Super Admin')
-  const balancesQuery = useLeaveBalances(currentUser.roles.some((role) => ['Human Resource', 'Admin', 'Super Admin'].includes(role)))
+  const balancesQuery = useLeaveBalances(isAdmin)
   const peopleQuery = useLeavePeople(isAdmin && view === 'Routing')
   const legacyArchiveQuery = useLegacyLeaveArchive(isAdmin)
   const createMutation = useCreateLeaveRequest()

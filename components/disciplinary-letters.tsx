@@ -36,6 +36,7 @@ import {
   useUploadDisciplinaryEvidence,
 } from '@/lib/disciplinary-queries'
 import { employeeDisplayName, type ErpState } from '@/lib/erp'
+import { hasAnyDepartmentRole, hasDepartmentRole } from '@/lib/authorization'
 
 const letterTypes: DisciplinaryLetterType[] = ['Written warning', 'Suspension', 'Termination']
 const approvalStages: Array<{ role: DisciplinaryApproverStage; field: keyof DisciplinaryApproverAssignments }> = [
@@ -89,9 +90,9 @@ function asMessage(error: unknown) {
 
 export default function DisciplinaryLettersPage({ state, currentUser }: { state: ErpState; currentUser: UserAccount }) {
   const roles = currentUser.roles
-  const isHr = roles.includes('Human Resource')
+  const isHr = hasDepartmentRole(roles, 'Human Resource')
   const isSuperAdmin = roles.includes('Super Admin')
-  const canReview = roles.some((role) => ['Human Resource', 'General Manager', 'Super Admin'].includes(role))
+  const canReview = hasAnyDepartmentRole(roles, ['Human Resource', 'General Manager'])
   const activeEmployees = state.employees.filter((employee) => employee.status === 'Active')
   const caseQuery = useDisciplinaryCases(canReview)
   const employeeCaseQuery = useMyDisciplinaryCases(true)
@@ -354,7 +355,7 @@ function ReviewerCase({ item, currentUser, isHr, busy, responseText, setResponse
     'General Manager': item.assignedApprovers?.generalManager,
     'Super Admin': item.assignedApprovers?.superAdmin,
   }
-  const canApprove = pendingStage && assignment[pendingStage] === currentUser.id && currentUser.roles.includes(pendingStage as DisciplinaryApproverStage)
+  const canApprove = pendingStage && (currentUser.roles.includes('Super Admin') || assignment[pendingStage] === currentUser.id && hasDepartmentRole(currentUser.roles, pendingStage as DisciplinaryApproverStage))
   const canRequestResponse = isHr && item.responseRequired && !item.response?.text && !item.noResponseRecordedAt && ['Draft', 'Under investigation', 'Changes requested'].includes(item.status)
   const canSubmit = isHr && ['Draft', 'Under investigation', 'Changes requested'].includes(item.status)
   const canUploadEvidence = isHr && ['Draft', 'Under investigation', 'Awaiting employee response', 'Changes requested'].includes(item.status)

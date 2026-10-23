@@ -45,14 +45,18 @@ import ExpenseManagement from "@/components/expense-management";
 import RawMaterialManagement from "@/components/raw-material-management";
 import ProductionManagement from "@/components/production-management";
 import AssetManagement from "@/components/asset-management";
-import DataBackup from "@/components/data-backup";
 import CompanyProfileManagement from "@/components/company-profile-management";
 import UserManagement from "@/components/user-management";
 import SecuritySettings from "@/components/security-settings";
 import Approvals from "@/components/approvals";
-import InvoiceManagement from "@/components/invoice-management";
 import LeaveManagement from "@/components/leave-management";
 import DisciplinaryLettersPage from "@/components/disciplinary-letters";
+import SalesManagementPage from "@/components/sales-management";
+import ReceiptManagementPage from "@/components/receipt-management";
+import OrdersManagement from "@/components/orders-management";
+import { hasAnyDepartmentRole, hasDepartmentRole } from "@/lib/authorization";
+import { importLegacyCustomersOnce } from "@/lib/customer-migration";
+import { importLegacySalesOnce } from "@/lib/sales-migration";
 import {
   useAttendanceMonth,
   useAttendanceYear,
@@ -74,10 +78,13 @@ import {
   employeeDisplayName,
   exportCsv,
   formatDate,
+  getSavedCustomersForImport,
+  getSavedSalesForImport,
   getLegacyEmployeeImport,
   clearLegacyEmployeeImport,
   initials,
   isWithinDays,
+  linkCustomerTransactions,
   loadState,
   money,
   navGroups,
@@ -95,16 +102,23 @@ import {
   type EmployeeDraft,
   type ErpState,
   type Invoice,
+  type Sale,
   type SalePayment,
 } from "@/lib/erp";
 import {
   type ActiveSession,
   ApiError,
   changePassword,
+  archiveCustomer as archiveCustomerApi,
+  changeCustomerStatus as changeCustomerStatusApi,
+  createCustomer as createCustomerApi,
   createEmployee as createEmployeeApi,
   deactivateEmployee as deactivateEmployeeApi,
   deleteEmployeeDraft,
   importLocalEmployees,
+  importLegacyCustomers,
+  importLegacySales,
+  listCustomers,
   listEmployeeDrafts,
   listEmployees,
   removeEmployeeDocument,
@@ -118,9 +132,12 @@ import {
   getEmployee,
   getEmployeeDocumentDownload,
   getPublicCompanyBrand,
+  listSales,
   reportSessionActivity,
+  restoreCustomer as restoreCustomerApi,
   signIn,
   signOut,
+  updateCustomer as updateCustomerApi,
   type PublicCompanyBrand,
   type DisciplinaryIndicator,
   type UserAccount,
@@ -787,10 +804,46 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [state, setState] = useState<ErpState>(loadState);
+  const customerCanRead = Boolean(
+    currentUser &&
+      hasAnyDepartmentRole(currentUser.roles, [
+        "Sales Manager",
+        "Marketing Manager",
+        "General Manager",
+        "Admin",
+      ]),
+  );
+  const customerCanManage = Boolean(
+    currentUser &&
+      hasAnyDepartmentRole(currentUser.roles, [
+        "Sales Manager",
+        "General Manager",
+        "Admin",
+      ]),
+  );
   const selectedEmployee = state.employees.find(
     (item) => item.id === selectedId,
   );
+  const selectedCustomer = state.customers.find(
+    (item) => item.id === selectedId,
+  );
   const [employeesLoaded, setEmployeesLoaded] = useState(false);
+  const [customersLoaded, setCustomersLoaded] = useState(false);
+  const [customersApiLoaded, setCustomersApiLoaded] = useState(false);
+  const [customerLoadError, setCustomerLoadError] = useState("");
+  const [customerLoadAttempt, setCustomerLoadAttempt] = useState(0);
+  const [salesLoaded, setSalesLoaded] = useState(false);
+  const [salesLoadError, setSalesLoadError] = useState("");
+  const [salesMigrationWarning, setSalesMigrationWarning] = useState("");
+  const [salesLoadAttempt, setSalesLoadAttempt] = useState(0);
+  const salesCanRead = Boolean(
+    currentUser &&
+      hasAnyDepartmentRole(currentUser.roles, [
+        "Sales Manager",
+        "General Manager",
+        "Super Admin",
+      ]),
+  );
   const [employeeLoadError, setEmployeeLoadError] = useState("");
   const [employeeDetailLoading, setEmployeeDetailLoading] = useState(false);
   const [employeeLoadAttempt, setEmployeeLoadAttempt] = useState(0);
@@ -908,6 +961,115 @@ function App() {
     };
   }, [currentUser, employeeLoadAttempt]);
   useEffect(() => {
+    if (!currentUser || currentUser.mustChangePassword || !customerCanRead) {
+      setCustomersLoaded(false);
+      setCustomersApiLoaded(false);
+      setCustomerLoadError("");
+      return;
+    }
+    let mounted = true;
+    setCustomersLoaded(false);
+    setCustomersApiLoaded(false);
+    setCustomerLoadError("");
+    const loadCustomers = async () => {
+      let migrationWarning = "";
+      try {
+        migrationWarning = await importLegacyCustomersOnce(
+          customerCanManage,
+          getSavedCustomersForImport(),
+          importLegacyCustomers,
+        );
+      } catch (error) {
+        migrationWarning =
+          `Customer import did not complete: ${error instanceof ApiError ? error.message : error instanceof Error ? error.message : "Unknown error."} Local data was retained.`;
+      }
+      try {
+        const customers = await listCustomers();
+        if (!mounted) return;
+        setCustomersApiLoaded(true);
+        setState((current) => {
+          const next = linkCustomerTransactions({ ...current, customers });
+          saveState(next);
+          return next;
+        });
+        setCustomerLoadError(migrationWarning);
+      } catch (error) {
+        if (!mounted) return;
+        setCustomersApiLoaded(false);
+        const loadMessage =
+          error instanceof ApiError
+            ? error.message
+            : "Could not load customer records.";
+        setCustomerLoadError(
+          migrationWarning ? `${migrationWarning} ${loadMessage}` : loadMessage,
+        );
+      } finally {
+        if (mounted) setCustomersLoaded(true);
+      }
+    };
+    void loadCustomers();
+    return () => {
+      mounted = false;
+    };
+  }, [
+    currentUser?.id,
+    currentUser?.mustChangePassword,
+    customerCanRead,
+    customerCanManage,
+    customerLoadAttempt,
+  ]);
+  useEffect(() => {
+    if (!currentUser || currentUser.mustChangePassword || !salesCanRead) {
+      setSalesLoaded(false);
+      setSalesLoadError("");
+      setSalesMigrationWarning("");
+      return;
+    }
+    let mounted = true;
+    setSalesLoaded(false);
+    setSalesLoadError("");
+    const loadSales = async () => {
+      let migrationWarning = "";
+      try {
+        migrationWarning = await importLegacySalesOnce(
+          salesCanRead,
+          getSavedSalesForImport(),
+          importLegacySales,
+        );
+      } catch (error) {
+        migrationWarning = `Sales import did not complete: ${error instanceof Error ? error.message : "Unknown error."} Local data was retained.`;
+      }
+      if (mounted) setSalesMigrationWarning(migrationWarning);
+      try {
+        const { sales, payments } = await listSales();
+        if (!mounted) return;
+        setState((current) => {
+          const next = { ...current, sales, payments };
+          saveState(next);
+          return next;
+        });
+      } catch (error: unknown) {
+        if (!mounted) return;
+        setSalesLoadError(
+          error instanceof ApiError
+            ? error.message
+            : "Could not load sales records.",
+        );
+      } finally {
+        if (mounted) setSalesLoaded(true);
+      }
+    };
+    void loadSales();
+    return () => {
+      mounted = false;
+    };
+  }, [
+    currentUser?.id,
+    currentUser?.mustChangePassword,
+    salesCanRead,
+    salesLoadAttempt,
+  ]);
+  useEffect(() => {
     if (
       active !== "Employee Profile Details" ||
       !selectedId ||
@@ -993,10 +1155,32 @@ function App() {
     return () => window.removeEventListener("erp:view", handler);
   }, []);
   const updateState = (next: ErpState) => {
-    setState(next);
-    saveState(next);
+    const linked = linkCustomerTransactions(next);
+    setState(linked);
+    saveState(linked);
     queryClient.invalidateQueries();
   };
+  const updateSale = (sale: Sale, payments: SalePayment[]) => {
+    setState((current) => ({
+      ...current,
+      sales: [sale, ...current.sales.filter((item) => item.id !== sale.id)],
+      payments: [
+        ...current.payments.filter((payment) => payment.saleId !== sale.id),
+        ...payments,
+      ],
+    }));
+  };
+  const updateCustomers = useCallback(
+    (customers: ErpState["customers"]) => {
+      setState((current) => {
+        const next = linkCustomerTransactions({ ...current, customers });
+        saveState(next);
+        return next;
+      });
+      queryClient.invalidateQueries();
+    },
+    [],
+  );
   const applyCompanyProfile = (companyProfile: CompanyProfile) => {
     setState((current) => {
       const next = {
@@ -1021,6 +1205,12 @@ function App() {
         state.companyProfile.legalName ||
         publicBrand.companyName
       : publicBrand.companyName;
+  const assetCanRead = Boolean(
+    currentUser && hasAnyDepartmentRole(currentUser.roles, ["Inventory Manager", "General Manager"]),
+  );
+  const assetCanEdit = Boolean(
+    currentUser && hasDepartmentRole(currentUser.roles, "Inventory Manager"),
+  );
   const companyLogoUrl =
     currentUser && companyProfileLoaded
       ? state.companyProfile.logo.url || publicBrand.logoUrl
@@ -1093,11 +1283,15 @@ function App() {
           onReset={() =>
             updateState({
               ...cloneSeed(),
+              customers: state.customers,
               companyProfile: state.companyProfile,
             })
           }
           companyName={companyName}
           companyLogoUrl={companyLogoUrl}
+          canReadAssets={assetCanRead}
+          canReadCustomers={customerCanRead}
+          canReadSales={salesCanRead}
         />
         <div
           className={`transition-[margin] duration-200 ${collapsed ? "lg:ml-[76px]" : "lg:ml-[252px]"}`}
@@ -1144,18 +1338,47 @@ function App() {
                 companyLogoUrl={companyLogoUrl}
                 userName={currentUser.name}
               />
-            ) : active === "Credit Sales" ? (
-              <CreditSalesPage state={state} updateState={updateState} />
+            ) : active === "Sales" || active === "Credit Sales" ? (
+              !salesCanRead ? (
+                <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                  You do not have permission to access sales records.
+                </section>
+              ) : (
+                <SalesManagementPage
+                  mode={active === "Credit Sales" ? "credit" : "sales"}
+                  state={state}
+                  currentUser={currentUser}
+                  salesLoading={!salesLoaded}
+                  salesError={salesLoadError}
+                  onRetrySales={() =>
+                    setSalesLoadAttempt((attempt) => attempt + 1)
+                  }
+                  onSaleUpdated={updateSale}
+                  salesWarning={salesMigrationWarning}
+                  customersAvailable={customersApiLoaded}
+                  onRetryCustomers={() =>
+                    setCustomerLoadAttempt((attempt) => attempt + 1)
+                  }
+                  companyName={companyName}
+                  companyLogoUrl={companyLogoUrl}
+                />
+              )
+            ) : active === "Receipt Management" ? (
+              !salesCanRead ? (
+                <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                  You do not have permission to access receipts.
+                </section>
+              ) : (
+                <ReceiptManagementPage
+                  companyName={companyName}
+                  companyLogoUrl={companyLogoUrl}
+                />
+              )
             ) : active === "Payroll Management" ? (
               <PayrollManagementPage
                 state={state}
-                updateState={updateState}
                 currentUser={currentUser}
                 initialRunId={selectedPayrollRunId}
-                onViewEmployee={(id) => {
-                  setSelectedId(id);
-                  setActive("Employee Profile Details");
-                }}
               />
             ) : active === "Salary Advance Management" ? (
               <SalaryAdvanceManagement
@@ -1197,20 +1420,9 @@ function App() {
                   employee={selectedEmployee}
                   state={state}
                   updateState={updateState}
-                  canManage={currentUser.roles.some((role) =>
-                    ["Super Admin", "Admin", "Human Resource"].includes(role),
-                  )}
-                  canReadAdvances={currentUser.roles.some((role) =>
-                    [
-                      "Super Admin",
-                      "Admin",
-                      "Human Resource",
-                      "General Manager",
-                    ].includes(role),
-                  )}
-                  canReadDisciplinary={currentUser.roles.some((role) =>
-                    ["Human Resource", "General Manager", "Super Admin"].includes(role),
-                  )}
+                  canManage={hasAnyDepartmentRole(currentUser.roles, ["Admin", "Human Resource"])}
+                  canReadAdvances={hasAnyDepartmentRole(currentUser.roles, ["Admin", "Human Resource", "General Manager"])}
+                  canReadDisciplinary={hasAnyDepartmentRole(currentUser.roles, ["Human Resource", "General Manager"])}
                   onEmployeeUpdated={(employee) =>
                     setState((current) => ({
                       ...current,
@@ -1244,14 +1456,39 @@ function App() {
                 </section>
               )
             ) : active === "Customer Details" ? (
-              <CustomerDetails
-                customer={
-                  state.customers.find((item) => item.id === selectedId) ||
-                  state.customers[0]
-                }
-                state={state}
-                onBack={() => setActive("Customer Management")}
-              />
+              !customerCanRead ? (
+                <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                  You do not have permission to view customer records.
+                </section>
+              ) : !customersLoaded ? (
+                <p role="status" className="p-8 text-sm text-slate-500">
+                  Loading customer profile…
+                </p>
+              ) : selectedCustomer ? (
+                <>
+                  {customerLoadError && (
+                    <p role="alert" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      {customerLoadError}
+                    </p>
+                  )}
+                  <CustomerDetails
+                    customer={selectedCustomer}
+                    state={state}
+                    onBack={() => setActive("Customer Management")}
+                  />
+                </>
+              ) : (
+                <section role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  {customerLoadError || "This customer profile could not be found."}
+                  <button
+                    type="button"
+                    onClick={() => setCustomerLoadAttempt((attempt) => attempt + 1)}
+                    className="ml-3 font-semibold underline"
+                  >
+                    Retry
+                  </button>
+                </section>
+              )
             ) : active === "Employee Profiles" ? (
               <EmployeeDirectory
                 state={state}
@@ -1277,9 +1514,7 @@ function App() {
                 }
               />
             ) : active === "Attendance Management" ? (
-              currentUser.roles.some((role) =>
-                ["Super Admin", "Admin", "Human Resource"].includes(role),
-              ) ? (
+              hasAnyDepartmentRole(currentUser.roles, ["Admin", "Human Resource"]) ? (
                 <AttendancePage
                   state={state}
                   employeesLoaded={employeesLoaded}
@@ -1315,6 +1550,10 @@ function App() {
                   setSelectedAdvanceId(id);
                   setActive("Salary Advance Management");
                 }}
+                onViewPayrollRun={(id) => {
+                  setSelectedPayrollRunId(id);
+                  setActive("Payroll Management");
+                }}
                 onView={(id) => {
                   setSelectedId(id);
                   setActive(
@@ -1323,6 +1562,14 @@ function App() {
                       : "Customer Details",
                   );
                 }}
+                updateCustomers={updateCustomers}
+                customersLoaded={customersLoaded}
+                customersApiLoaded={customersApiLoaded}
+                customerLoadError={customerLoadError}
+                onRetryCustomers={() =>
+                  setCustomerLoadAttempt((attempt) => attempt + 1)
+                }
+                customerCanManage={customerCanManage}
               />
             )}
           </main>
@@ -2252,6 +2499,9 @@ function Sidebar({
   onReset,
   companyName,
   companyLogoUrl,
+  canReadAssets,
+  canReadCustomers,
+  canReadSales,
 }: {
   active: string;
   setActive: (value: string) => void;
@@ -2262,7 +2512,23 @@ function Sidebar({
   onReset: () => void;
   companyName: string;
   companyLogoUrl: string;
+  canReadAssets: boolean;
+  canReadCustomers: boolean;
+  canReadSales: boolean;
 }) {
+  const visibleNavGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) =>
+          (item.label !== "Assets Management" || canReadAssets) &&
+          (item.label !== "Customer Management" || canReadCustomers) &&
+          (item.label !== "Sales" || canReadSales) &&
+          (item.label !== "Credit Sales" || canReadSales) &&
+          (item.label !== "Receipt Management" || canReadSales),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
     <>
       <div
@@ -2306,7 +2572,7 @@ function Sidebar({
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-5">
-          {navGroups.map((group) => (
+          {visibleNavGroups.map((group) => (
             <div key={group.label} className="mb-5">
               <div
                 className={`mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 ${collapsed ? "lg:hidden" : ""}`}
@@ -2315,18 +2581,23 @@ function Sidebar({
               </div>
               {group.items.map((item) => {
                 const Icon = iconMap[item.icon] || LayoutFallback;
+                const comingSoon = item.label === "Data Backup" || item.label === "Invoicing";
                 return (
                   <button
                     key={item.label}
                     title={collapsed ? item.label : undefined}
+                    disabled={comingSoon}
                     onClick={() => setActive(item.label)}
-                    className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${active === item.label ? "bg-[#f1eafd] text-[#6d28d9]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${comingSoon ? "cursor-not-allowed text-slate-400" : active === item.label ? "bg-[#f1eafd] text-[#6d28d9]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
                     <Icon
                       className={`size-[17px] shrink-0 ${active === item.label ? "text-[#6d28d9]" : "text-slate-400 group-hover:text-slate-600"}`}
                     />
                     {!collapsed && (
-                      <span className="truncate">{item.label}</span>
+                      <span className="flex min-w-0 items-center gap-1.5 truncate">
+                        <span className="truncate">{item.label}</span>
+                        {comingSoon && <span className="shrink-0 text-[10px] font-medium text-slate-400">(coming soon!)</span>}
+                      </span>
                     )}
                     {!collapsed && active === item.label && (
                       <span className="ml-auto size-1.5 rounded-full bg-[#6d28d9]" />
@@ -2348,22 +2619,6 @@ function Sidebar({
             <Settings2 className="size-[17px] text-slate-400" />
             {!collapsed && <span>Reset demo data</span>}
           </button>
-          <div
-            className={`mt-3 flex items-center gap-3 rounded-xl bg-slate-50 p-3 ${collapsed ? "lg:hidden" : ""}`}
-          >
-            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#e9ddff] text-[11px] font-bold text-[#6d28d9]">
-              SN
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-xs font-semibold">
-                Sarah Namirembe
-              </div>
-              <div className="truncate text-[10px] text-slate-400">
-                Administrator
-              </div>
-            </div>
-            <ChevronDown className="ml-auto size-3.5 text-slate-400" />
-          </div>
         </div>
       </aside>
     </>
@@ -5333,24 +5588,36 @@ function customerSalesFor(
   customer: ErpState["customers"][number],
   state: ErpState,
 ) {
-  return state.sales.filter((sale) =>
-    sale.customerId
-      ? sale.customerId === customer.id
-      : sale.customer.trim().toLowerCase() ===
-        customer.name.trim().toLowerCase(),
-  );
+  return state.sales.filter((sale) => {
+    if (sale.customerId === customer.id) return true;
+    if (sale.customerId && state.customers.some((item) => item.id === sale.customerId)) {
+      return false;
+    }
+    const matches = state.customers.filter(
+      (item) =>
+        item.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+        sale.customer.trim().replace(/\s+/g, " ").toLowerCase(),
+    );
+    return matches.length === 1 && matches[0].id === customer.id;
+  });
 }
 
 function customerOrdersFor(
   customer: ErpState["customers"][number],
   state: ErpState,
 ) {
-  return state.orders.filter((order) =>
-    order.customerId
-      ? order.customerId === customer.id
-      : order.customer.trim().toLowerCase() ===
-        customer.name.trim().toLowerCase(),
-  );
+  return state.orders.filter((order) => {
+    if (order.customerId === customer.id) return true;
+    if (order.customerId && state.customers.some((item) => item.id === order.customerId)) {
+      return false;
+    }
+    const matches = state.customers.filter(
+      (item) =>
+        item.name.trim().replace(/\s+/g, " ").toLowerCase() ===
+        order.customer.trim().replace(/\s+/g, " ").toLowerCase(),
+    );
+    return matches.length === 1 && matches[0].id === customer.id;
+  });
 }
 
 function customerCreditBalance(
@@ -5366,11 +5633,19 @@ function customerCreditBalance(
 
 function CustomerManagementPage({
   state,
-  updateState,
+  updateCustomers,
+  customersLoaded,
+  loadError,
+  onRetry,
+  canManage,
   onView,
 }: {
   state: ErpState;
-  updateState: (next: ErpState) => void;
+  updateCustomers: (customers: ErpState["customers"]) => void;
+  customersLoaded: boolean;
+  loadError: string;
+  onRetry: () => void;
+  canManage: boolean;
   onView: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -5387,6 +5662,8 @@ function CustomerManagementPage({
   const [openActionId, setOpenActionId] = useState<string | null>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (!openActionId) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -5406,6 +5683,35 @@ function CustomerManagementPage({
   const yearStart = `${now.getFullYear()}-01-01`;
   const selectedPeriodStart =
     period === "month" ? monthStart : period === "year" ? yearStart : "";
+  const runCustomerMutation = async (
+    work: () => Promise<ErpState["customers"][number]>,
+    successMessage: string,
+  ) => {
+    if (!canManage || !customersLoaded || saving) return null;
+    setSaving(true);
+    setActionError("");
+    try {
+      const updatedCustomer = await work();
+      updateCustomers([
+        updatedCustomer,
+        ...state.customers.filter((item) => item.id !== updatedCustomer.id),
+      ]);
+      setToast(successMessage);
+      window.setTimeout(() => setToast(""), 2600);
+      return updatedCustomer;
+    } catch (error) {
+      setActionError(
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "The customer change could not be saved.",
+      );
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  };
   const activeCustomers = state.customers.filter(
     (customer) => customer.status === "Active" && !customer.archivedAt,
   );
@@ -5480,10 +5786,9 @@ function CustomerManagementPage({
         customer.referredBy === referrerFilter)
     );
   });
-  const saveCustomer = (form: FormData) => {
+  const saveCustomer = async (form: FormData) => {
     const existing = editingCustomer;
-    const customer: ErpState["customers"][number] = {
-      id: existing?.id ?? createId("C"),
+    const customer = {
       name: String(form.get("name") || "").trim(),
       type: String(form.get("type") || "Small dealer"),
       contact: String(form.get("contact") || "").trim(),
@@ -5495,74 +5800,64 @@ function CustomerManagementPage({
       country: String(form.get("country") || "").trim() || undefined,
       referredBy: String(form.get("referredBy") || "").trim(),
       notes: String(form.get("notes") || "").trim() || undefined,
-      createdAt: existing?.createdAt ?? new Date().toISOString(),
-      archivedAt: existing?.archivedAt,
       status: String(form.get("status") || "Active") as
         | "Active"
         | "Inactive"
         | "Suspended",
-      purchases: existing?.purchases ?? 0,
     };
-    updateState({
-      ...state,
-      customers: existing
-        ? state.customers.map((item) =>
-            item.id === existing.id ? customer : item,
-          )
-        : [customer, ...state.customers],
-    });
+    const saved = await runCustomerMutation(
+      () =>
+        existing
+          ? updateCustomerApi(existing.id, customer)
+          : createCustomerApi({
+              name: customer.name,
+              type: customer.type,
+              phone: customer.phone,
+              contact: customer.contact,
+              email: customer.email,
+              region: customer.region,
+              district: customer.district,
+              tin: customer.tin,
+              country: customer.country,
+              referredBy: customer.referredBy,
+              notes: customer.notes,
+              status: customer.status,
+            }),
+      existing ? "Customer updated" : "Customer added",
+    );
+    if (!saved) return;
     setEditingCustomer(null);
     setShowForm(false);
-    setToast(existing ? "Customer updated" : "Customer added");
-    window.setTimeout(() => setToast(""), 2600);
   };
   const setCustomerStatus = (
     customer: ErpState["customers"][number],
     status: "Active" | "Suspended",
   ) => {
-    updateState({
-      ...state,
-      customers: state.customers.map((item) =>
-        item.id === customer.id ? { ...item, status } : item,
-      ),
-    });
-    setOpenActionId(null);
-    setToast(
+    void runCustomerMutation(
+      () => changeCustomerStatusApi(customer.id, status),
       status === "Suspended" ? "Customer suspended" : "Customer set to active",
     );
-    window.setTimeout(() => setToast(""), 2600);
+    setOpenActionId(null);
   };
   const setCustomerArchived = (
     customer: ErpState["customers"][number],
     archived: boolean,
   ) => {
-    updateState({
-      ...state,
-      customers: state.customers.map((item) =>
-        item.id === customer.id
-          ? {
-              ...item,
-              archivedAt: archived ? new Date().toISOString() : undefined,
-            }
-          : item,
-      ),
-    });
+    void runCustomerMutation(
+      () =>
+        archived
+          ? archiveCustomerApi(customer.id)
+          : restoreCustomerApi(customer.id),
+      archived ? "Customer archived" : "Customer restored",
+    );
     setOpenActionId(null);
-    setToast(archived ? "Customer archived" : "Customer restored");
-    window.setTimeout(() => setToast(""), 2600);
   };
   const activateCustomer = (customer: ErpState["customers"][number]) => {
-    updateState({
-      ...state,
-      customers: state.customers.map((item) =>
-        item.id === customer.id
-          ? { ...item, status: "Active", archivedAt: undefined }
-          : item,
-      ),
-    });
+    void runCustomerMutation(
+      () => updateCustomerApi(customer.id, { status: "Active", archivedAt: null }),
+      "Customer set to active",
+    );
     setOpenActionId(null);
-    setToast("Customer set to active");
-    window.setTimeout(() => setToast(""), 2600);
   };
   const downloadCustomer = (customer: ErpState["customers"][number]) => {
     const sales = customerSalesFor(customer, state);
@@ -5642,18 +5937,40 @@ function CustomerManagementPage({
           >
             <Download className="size-4" /> Export CSV
           </button>
-          <button
-            onClick={() => {
-              setEditingCustomer(null);
-              setShowForm(true);
-            }}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6]"
-          >
-            <Plus className="size-4" /> Add customer
-          </button>
+          {canManage && (
+            <button
+              disabled={!customersLoaded || saving}
+              onClick={() => {
+                setEditingCustomer(null);
+                setActionError("");
+                setShowForm(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="size-4" /> Add customer
+            </button>
+          )}
         </div>
       </div>
 
+      {!customersLoaded && (
+        <p role="status" className="mb-4 rounded-lg bg-white px-4 py-3 text-sm text-slate-500">
+          Loading customer records…
+        </p>
+      )}
+      {loadError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>{loadError}</span>
+          <button type="button" onClick={onRetry} className="font-semibold underline">
+            Retry
+          </button>
+        </div>
+      )}
+      {actionError && (
+        <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {actionError}
+        </p>
+      )}
       {toast && (
         <div
           role="status"
@@ -5887,6 +6204,7 @@ function CustomerManagementPage({
                       >
                         <button
                           type="button"
+                          disabled={!customersLoaded || saving}
                           aria-label={`Actions for ${customer.name}`}
                           aria-expanded={openActionId === customer.id}
                           aria-haspopup="menu"
@@ -5917,20 +6235,24 @@ function CustomerManagementPage({
                               <Icons.UserRound className="size-3.5 text-slate-400" />{" "}
                               View profile
                             </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => {
-                                setEditingCustomer(customer);
-                                setShowForm(true);
-                                setOpenActionId(null);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
-                            >
-                              <Icons.PencilLine className="size-3.5 text-slate-400" />{" "}
-                              Edit customer
-                            </button>
-                            {!customer.archivedAt &&
+                            {canManage && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setEditingCustomer(customer);
+                                  setActionError("");
+                                  setShowForm(true);
+                                  setOpenActionId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                              >
+                                <Icons.PencilLine className="size-3.5 text-slate-400" />{" "}
+                                Edit customer
+                              </button>
+                            )}
+                            {canManage &&
+                              !customer.archivedAt &&
                               customer.status !== "Suspended" && (
                                 <button
                                   type="button"
@@ -5944,18 +6266,19 @@ function CustomerManagementPage({
                                   Suspend
                                 </button>
                               )}
-                            {(customer.status !== "Active" ||
-                              customer.archivedAt) && (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                onClick={() => activateCustomer(customer)}
-                                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
-                              >
-                                <Icons.CircleCheck className="size-3.5 text-slate-400" />{" "}
-                                Set active
-                              </button>
-                            )}
+                            {canManage &&
+                              (customer.status !== "Active" ||
+                                customer.archivedAt) && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => activateCustomer(customer)}
+                                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-slate-600 hover:bg-slate-50"
+                                >
+                                  <Icons.CircleCheck className="size-3.5 text-slate-400" />{" "}
+                                  Set active
+                                </button>
+                              )}
                             <button
                               type="button"
                               role="menuitem"
@@ -5965,30 +6288,34 @@ function CustomerManagementPage({
                               <Icons.Download className="size-3.5 text-slate-400" />{" "}
                               Download
                             </button>
-                            <div className="my-1 border-t border-slate-100" />
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() =>
-                                setCustomerArchived(
-                                  customer,
-                                  !customer.archivedAt,
-                                )
-                              }
-                              className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-rose-700 hover:bg-rose-50"
-                            >
-                              {customer.archivedAt ? (
-                                <>
-                                  <Icons.ArchiveRestore className="size-3.5" />{" "}
-                                  Restore from archive
-                                </>
-                              ) : (
-                                <>
-                                  <Icons.Archive className="size-3.5" /> Archive
-                                  customer
-                                </>
-                              )}
-                            </button>
+                            {canManage && (
+                              <div className="my-1 border-t border-slate-100" />
+                            )}
+                            {canManage && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() =>
+                                  setCustomerArchived(
+                                    customer,
+                                    !customer.archivedAt,
+                                  )
+                                }
+                                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs text-rose-700 hover:bg-rose-50"
+                              >
+                                {customer.archivedAt ? (
+                                  <>
+                                    <Icons.ArchiveRestore className="size-3.5" />{" "}
+                                    Restore from archive
+                                  </>
+                                ) : (
+                                  <>
+                                    <Icons.Archive className="size-3.5" /> Archive
+                                    customer
+                                  </>
+                                )}
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -6019,6 +6346,8 @@ function CustomerManagementPage({
       {showForm && (
         <CustomerFormDialog
           customer={editingCustomer}
+          isSaving={saving}
+          saveError={actionError}
           onClose={() => {
             setShowForm(false);
             setEditingCustomer(null);
@@ -6073,10 +6402,14 @@ function CustomerMetric({
 
 function CustomerFormDialog({
   customer,
+  isSaving,
+  saveError,
   onClose,
   onSave,
 }: {
   customer: ErpState["customers"][number] | null;
+  isSaving: boolean;
+  saveError: string;
   onClose: () => void;
   onSave: (form: FormData) => void;
 }) {
@@ -6125,6 +6458,11 @@ function CustomerFormDialog({
           }}
           className="p-5"
         >
+          {saveError && (
+            <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+              {saveError}
+            </p>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className={`${labelClass} sm:col-span-2`}>
               Customer or business name
@@ -6277,8 +6615,11 @@ function CustomerFormDialog({
             >
               Cancel
             </button>
-            <button className="rounded-lg bg-[#6d28d9] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6]">
-              {customer ? "Save changes" : "Create customer"}
+            <button
+              disabled={isSaving}
+              className="rounded-lg bg-[#6d28d9] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSaving ? "Saving…" : customer ? "Save changes" : "Create customer"}
             </button>
           </div>
         </form>
@@ -6740,6 +7081,11 @@ function Header({
             <span>/</span>
             <span className="text-slate-600">{active}</span>
           </div>
+          {currentUser.roles.includes("Super Admin") && (
+            <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800">
+              Temporary all-department access
+            </span>
+          )}
           {/* <h1 className="mt-0.5 text-lg font-bold tracking-tight sm:text-xl">
             {active}
           </h1> */}
@@ -7959,7 +8305,14 @@ function ModulePage({
   onCompanyProfileSave,
   onCurrentSessionRevoked,
   onViewSalaryAdvance,
+  onViewPayrollRun,
   onView,
+  updateCustomers,
+  customersLoaded,
+  customersApiLoaded,
+  customerLoadError,
+  onRetryCustomers,
+  customerCanManage,
 }: {
   active: string;
   state: ErpState;
@@ -7971,8 +8324,25 @@ function ModulePage({
   onCompanyProfileSave: (profile: CompanyProfile) => void;
   onCurrentSessionRevoked: () => void;
   onViewSalaryAdvance: (id: string) => void;
+  onViewPayrollRun: (id: string) => void;
   onView: (id: string) => void;
+  updateCustomers: (customers: ErpState["customers"]) => void;
+  customersLoaded: boolean;
+  customersApiLoaded: boolean;
+  customerLoadError: string;
+  onRetryCustomers: () => void;
+  customerCanManage: boolean;
 }) {
+  const customerCanRead = hasAnyDepartmentRole(currentUser.roles, [
+    "Sales Manager",
+    "Marketing Manager",
+    "General Manager",
+    "Admin",
+  ]);
+  const assetCanRead = currentUser.roles.some((role) =>
+    ["Inventory Manager", "General Manager", "Super Admin"].includes(role),
+  );
+  const assetCanEdit = currentUser.roles.includes("Inventory Manager");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [toast, setToast] = useState("");
@@ -8044,14 +8414,44 @@ function ModulePage({
       document.removeEventListener("pointerdown", handleOutsideClick);
   }, [showOrderFilters]);
   if (active === "Expenses")
-    return <ExpenseManagement state={state} updateState={updateState} />;
+    return (
+      <ExpenseManagement
+        state={state}
+        currentUser={currentUser}
+        onViewPayrollRun={onViewPayrollRun}
+      />
+    );
   if (active === "Raw Material Management")
     return <RawMaterialManagement />;
+  if (active === "Orders")
+    return (
+      <OrdersManagement
+        state={state}
+        currentUser={currentUser}
+        customersLoaded={customersLoaded}
+        customersApiLoaded={customersApiLoaded}
+        customerLoadError={customerLoadError}
+        onRetryCustomers={onRetryCustomers}
+        onStateChange={updateState}
+      />
+    );
   if (active === "Production Management")
     return <ProductionManagement />;
   if (active === "Assets Management")
-    return <AssetManagement state={state} updateState={updateState} />;
-  if (active === "Data Backup") return <DataBackup />;
+    return (
+      <AssetManagement
+        state={state}
+        canRead={assetCanRead}
+        canEdit={assetCanEdit}
+      />
+    );
+  if (active === "Data Backup")
+    return (
+      <section role="status" className="rounded-xl border border-slate-200 bg-white p-8 text-center">
+        <h2 className="text-lg font-semibold text-slate-900">Data Backup is coming soon</h2>
+        <p className="mt-1 text-sm text-slate-500">This section is not available yet.</p>
+      </section>
+    );
   if (active === "Company Profile Management")
     return (
       <CompanyProfileManagement
@@ -8073,9 +8473,9 @@ function ModulePage({
     return (
       <Approvals
         state={state}
-        updateState={updateState}
         currentUser={currentUser}
         onViewSalaryAdvance={onViewSalaryAdvance}
+        onViewPayrollRun={onViewPayrollRun}
       />
     );
   const kind = active.split(" ")[0];
@@ -8356,16 +8756,32 @@ function ModulePage({
     return <DisciplinaryLettersPage state={state} currentUser={currentUser} />;
   }
   if (active === "Customer Management") {
+    if (!customerCanRead) {
+      return (
+        <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          You do not have permission to view customer records.
+        </section>
+      );
+    }
     return (
       <CustomerManagementPage
         state={state}
-        updateState={updateState}
+        updateCustomers={updateCustomers}
+        customersLoaded={customersLoaded}
+        loadError={customerLoadError}
+        onRetry={onRetryCustomers}
+        canManage={customerCanManage}
         onView={onView}
       />
     );
   }
   if (active === "Invoicing") {
-    return <InvoiceManagement state={state} updateState={updateState} />;
+    return (
+      <section role="status" className="rounded-xl border border-slate-200 bg-white p-8 text-center">
+        <h2 className="text-lg font-semibold text-slate-900">Invoicing is coming soon</h2>
+        <p className="mt-1 text-sm text-slate-500">This section is not available yet.</p>
+      </section>
+    );
   }
   return (
     <div className="animate-in fade-in duration-300">

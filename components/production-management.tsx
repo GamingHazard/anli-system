@@ -33,10 +33,12 @@ function messageFor(error: unknown) {
 }
 
 function stockLabel(product: ProductionProduct) {
-  if (!product.piecesPerPack) return `${product.balancePieces.toLocaleString()} pieces`
+  const availablePieces = product.availablePieces ?? Math.max(0, product.balancePieces - (product.reservedPieces ?? 0))
+  const reservedPieces = product.reservedPieces ?? 0
+  if (!product.piecesPerPack) return `${product.balancePieces.toLocaleString()} on hand · ${reservedPieces.toLocaleString()} reserved · ${availablePieces.toLocaleString()} available pieces`
   const packs = Math.floor(product.balancePieces / product.piecesPerPack)
   const loose = product.balancePieces % product.piecesPerPack
-  return `${product.balancePieces.toLocaleString()} pieces · ${packs} ${product.packType?.toLowerCase() ?? 'packs'}${loose ? ` + ${loose} loose` : ''}`
+  return `${product.balancePieces.toLocaleString()} pcs on hand · ${packs} ${product.packType?.toLowerCase() ?? 'packs'}${loose ? ` + ${loose} loose` : ''} · ${reservedPieces.toLocaleString()} reserved · ${availablePieces.toLocaleString()} available`
 }
 
 function Metric({ label, value, detail, icon, tone }: { label: string; value: string; detail: string; icon: string; tone: 'purple' | 'blue' | 'amber' | 'rose' }) {
@@ -84,7 +86,9 @@ export default function ProductionManagement() {
   const movements = workspace.data?.movements ?? []
   const todayRuns = runs.filter((run) => run.productionDate === today())
   const todayProduced = todayRuns.reduce((total, run) => total + run.producedQuantityPieces, 0)
-  const todaySales = todayRuns.reduce((total, run) => total + run.salesQuantityPieces, 0)
+  const todaySales = movements
+    .filter((movement) => movement.date === today() && movement.type === 'Sales dispatch')
+    .reduce((total, movement) => total + movement.quantityPieces, 0)
   const todayDamage = todayRuns.reduce((total, run) => total + run.damagedQuantityPieces, 0)
   const totalStock = products.reduce((total, product) => total + product.balancePieces, 0)
 
@@ -138,6 +142,7 @@ export default function ProductionManagement() {
         category: input.category,
         unit: input.unit,
         flavour: input.flavour,
+        price: input.price,
         packType: input.packType ?? '',
         piecesPerPack: input.packType ? input.piecesPerPack : null,
         packWeightKg: input.packType ? input.packWeightKg : null,
@@ -162,7 +167,6 @@ export default function ProductionManagement() {
       productId: String(form.get('productId')),
       productionDate: String(form.get('productionDate')),
       openingStockPieces: Number(form.get('openingStockPieces')),
-      salesQuantityPieces: Number(form.get('salesQuantityPieces')),
       damagedQuantityPieces: Number(form.get('damagedQuantityPieces')),
       closingStockPieces: Number(form.get('closingStockPieces')),
       damageReason: String(form.get('damageReason') || ''),
@@ -198,11 +202,13 @@ export default function ProductionManagement() {
       code: product.code, product: product.name, category: product.category, flavour: product.flavour, unit: product.unit,
       packType: product.packType ?? '', piecesPerPack: product.piecesPerPack ?? '', packWeightKg: product.packWeightKg ?? '',
       balancePieces: product.balancePieces, status: product.active ? 'Active' : 'Inactive',
+      reservedPieces: product.reservedPieces ?? 0,
+      availablePieces: product.availablePieces ?? Math.max(0, product.balancePieces - (product.reservedPieces ?? 0)),
     })))
     else if (view === 'Finished stock') exportCsv('finished-stock-movements.csv', visibleMovements)
     else exportCsv('production-history.csv', visibleRuns.map((run) => ({
       date: run.productionDate, reference: run.reference, product: run.productName, openingPieces: run.openingStockPieces,
-      salesPieces: run.salesQuantityPieces, damagedPieces: run.damagedQuantityPieces, closingPieces: run.closingStockPieces,
+      legacySalesPieces: run.salesQuantityPieces, damagedPieces: run.damagedQuantityPieces, closingPieces: run.closingStockPieces,
       producedPieces: run.producedQuantityPieces, recipeVersion: run.recipeVersion ?? '', actor: run.createdAt,
     })))
   }
@@ -216,7 +222,7 @@ export default function ProductionManagement() {
     <section aria-label="Production summary" className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric label="Produced today" value={todayProduced.toLocaleString()} detail={`${todayRuns.length} production records`} icon="Factory" tone="purple" />
       <Metric label="Finished stock on hand" value={totalStock.toLocaleString()} detail="Sellable pieces across active products" icon="PackageCheck" tone="blue" />
-      <Metric label="Sales entered today" value={todaySales.toLocaleString()} detail="Entered on daily production records" icon="Truck" tone="amber" />
+      <Metric label="Sales dispatched today" value={todaySales.toLocaleString()} detail="Posted by confirmed sales" icon="Truck" tone="amber" />
       <Metric label="Damage today" value={todayDamage.toLocaleString()} detail="Recorded write-offs" icon="PackageX" tone="rose" />
     </section>
 
@@ -236,7 +242,7 @@ export default function ProductionManagement() {
       {view === 'Production history' && <ProductionHistory runs={visibleRuns} onSelect={setSelectedRun} />}
 
       {message && <p role="status" className="border-t border-slate-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">{message}</p>}
-      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Sales entry remains manual in this scope. Product IDs and the stock ledger are server-backed and ready for a separately planned Sales integration.</footer>
+      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Sales dispatches are posted by confirmed sales. Daily production records calculate production from opening stock, damage, and physical closing stock; legacy sales entries remain visible in history.</footer>
     </section>
 
     {showProductForm && <ProductDialog key={editingProduct?.id ?? 'new'} product={editingProduct} materials={materials} message={message} onClose={() => { setShowProductForm(false); setEditingProduct(null) }} onSave={saveProduct} disabled={productMutation.isPending} />}
@@ -247,15 +253,14 @@ export default function ProductionManagement() {
 function DailyProductionForm({ products, runs, onSubmit, disabled }: { products: ProductionProduct[]; runs: ProductionRunRecord[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void; disabled: boolean }) {
   const [productId, setProductId] = useState(products[0]?.id ?? '')
   const [date, setDate] = useState(today())
-  const [sales, setSales] = useState('0')
   const [damage, setDamage] = useState('0')
   const [closing, setClosing] = useState('0')
   const [damageReason, setDamageReason] = useState('')
   const product = products.find((item) => item.id === productId)
   const opening = product?.balancePieces ?? 0
-  const produced = Number(closing) + Number(sales) + Number(damage) - opening
+  const produced = Number(closing) + Number(damage) - opening
   const duplicate = runs.some((run) => run.productId === productId && run.productionDate === date)
-  const invalidCount = [opening, Number(sales), Number(damage), Number(closing), produced].some((value) => !Number.isFinite(value) || value < 0)
+  const invalidCount = [opening, Number(damage), Number(closing), produced].some((value) => !Number.isFinite(value) || value < 0)
   const blocked = !product || invalidCount || duplicate || (Number(damage) > 0 && !damageReason.trim()) || (product.recipeRequired && !product.recipe)
 
   return <form onSubmit={onSubmit} className="p-4">
@@ -264,11 +269,10 @@ function DailyProductionForm({ products, runs, onSubmit, disabled }: { products:
       <Field label="Product"><select required name="productId" value={productId} onChange={(event) => setProductId(event.target.value)} className={inputClass}><option value="">Select product</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field>
       <Field label="Current opening stock (pieces)"><input name="openingStockPieces" type="number" value={opening} readOnly className={`${inputClass} bg-slate-50`} /><span className="mt-1 block text-[10px] font-normal text-slate-400">{product ? stockLabel(product) : 'Select a product'}</span></Field>
       {product?.packType && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs"><div className="font-semibold">{product.packType}: {product.piecesPerPack} pieces</div><div className="mt-1 text-slate-500">{product.packWeightKg} kg net product weight per pack</div></div>}
-      <Field label="Sales / dispatched (pieces)"><input required name="salesQuantityPieces" type="number" min="0" step="1" value={sales} onChange={(event) => setSales(event.target.value)} className={inputClass} /></Field>
       <Field label="Damaged / written off (pieces)"><input required name="damagedQuantityPieces" type="number" min="0" step="1" value={damage} onChange={(event) => setDamage(event.target.value)} className={inputClass} /></Field>
       <Field label="Damage reason"><input name="damageReason" required={Number(damage) > 0} value={damageReason} onChange={(event) => setDamageReason(event.target.value)} className={inputClass} /></Field>
       <Field label="Physical closing stock (pieces)"><input required name="closingStockPieces" type="number" min="0" step="1" value={closing} onChange={(event) => setClosing(event.target.value)} className={inputClass} /></Field>
-      <div className="rounded-lg border border-primary/20 bg-secondary/50 p-3"><div className="text-[10px] font-semibold uppercase text-secondary-foreground">Calculated production</div><div className="mt-1 text-lg font-bold text-primary">{Number.isFinite(produced) ? produced.toLocaleString() : '—'} pieces</div><p className="mt-1 text-[10px] text-slate-600">Closing + sales + damage − opening</p></div>
+      <div className="rounded-lg border border-primary/20 bg-secondary/50 p-3"><div className="text-[10px] font-semibold uppercase text-secondary-foreground">Calculated production</div><div className="mt-1 text-lg font-bold text-primary">{Number.isFinite(produced) ? produced.toLocaleString() : '—'} pieces</div><p className="mt-1 text-[10px] text-slate-600">Closing + damage − opening. Sales are dispatched from Sales.</p></div>
     </div>
     {product?.recipe && <p className="mt-3 text-xs text-slate-500">This product recipe is measured per 1,000-litre tank. Record the number of tanks made in Raw Material Management to calculate and deduct ingredient use.</p>}
     {product?.recipeRequired && !product.recipe && <p role="alert" className="mt-3 text-xs text-rose-700">This product requires a recipe before production can be posted.</p>}
@@ -279,7 +283,7 @@ function DailyProductionForm({ products, runs, onSubmit, disabled }: { products:
 
 function ProductTable({ products, onEdit, onToggle }: { products: ProductionProduct[]; onEdit: (product: ProductionProduct) => void; onToggle: (product: ProductionProduct) => void }) {
   if (!products.length) return <EmptyState title="No finished products" detail="Add a product profile, packaging details, and its recipe composition." />
-  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Code', 'Product', 'Category', 'Flavour', 'Unit', 'Outer pack', 'On hand', 'Recipe', 'Status', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{products.map((product) => <tr key={product.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3 font-mono font-semibold">{product.code}</td><td className="px-3 py-3 font-semibold text-slate-800">{product.name}</td><td className="px-3 py-3">{product.category}</td><td className="px-3 py-3">{product.flavour}</td><td className="px-3 py-3">{product.unit}</td><td className="px-3 py-3">{product.packType ? `${product.packType}: ${product.piecesPerPack} pcs · ${product.packWeightKg} kg` : '—'}</td><td className="px-3 py-3 font-semibold">{stockLabel(product)}</td><td className="px-3 py-3">{product.recipe ? `${product.recipe.ingredients.length} ingredients · v${product.recipe.version}` : product.recipeRequired ? <span className="text-rose-700">Required</span> : 'Not set'}</td><td className="px-3 py-3">{product.active ? 'Active' : 'Inactive'}</td><td className="px-3 py-3"><div className="flex gap-1"><button type="button" onClick={() => onEdit(product)} className="rounded-md border border-slate-200 px-2 py-1.5 font-semibold">Edit</button><button type="button" onClick={() => onToggle(product)} className="rounded-md border border-slate-200 px-2 py-1.5">{product.active ? 'Deactivate' : 'Activate'}</button></div></td></tr>)}</tbody></table></div>
+  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Code', 'Product', 'Category', 'Flavour', 'Unit', 'Outer pack', 'Price / pack', 'On hand / available', 'Recipe', 'Status', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{products.map((product) => <tr key={product.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3 font-mono font-semibold">{product.code}</td><td className="px-3 py-3 font-semibold text-slate-800">{product.name}</td><td className="px-3 py-3">{product.category}</td><td className="px-3 py-3">{product.flavour}</td><td className="px-3 py-3">{product.unit}</td><td className="px-3 py-3">{product.packType ? `${product.packType}: ${product.piecesPerPack} pcs · ${product.packWeightKg} kg` : '—'}</td><td className="px-3 py-3 font-semibold">{product.price ? new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX', maximumFractionDigits: 0 }).format(product.price) : 'Set price'}</td><td className="px-3 py-3 font-semibold">{stockLabel(product)}</td><td className="px-3 py-3">{product.recipe ? `${product.recipe.ingredients.length} ingredients · v${product.recipe.version}` : product.recipeRequired ? <span className="text-rose-700">Required</span> : 'Not set'}</td><td className="px-3 py-3">{product.active ? 'Active' : 'Inactive'}</td><td className="px-3 py-3"><div className="flex gap-1"><button type="button" onClick={() => onEdit(product)} className="rounded-md border border-slate-200 px-2 py-1.5 font-semibold">Edit</button><button type="button" onClick={() => onToggle(product)} className="rounded-md border border-slate-200 px-2 py-1.5">{product.active ? 'Deactivate' : 'Activate'}</button></div></td></tr>)}</tbody></table></div>
 }
 
 function ProductDialog({ product, materials, message, onClose, onSave, disabled }: { product: ProductionProduct | null; materials: ProductionMaterial[]; message: string; onClose: () => void; onSave: (input: Parameters<typeof createProductionProduct>[0], ingredients: Parameters<typeof updateProductionRecipe>[1]) => void; disabled: boolean }) {
@@ -304,6 +308,7 @@ function ProductDialog({ product, materials, message, onClose, onSave, disabled 
       category: String(form.get('category')) as 'Cup' | 'Bottle',
       unit: String(form.get('unit')),
       flavour: String(form.get('flavour')) as 'Mango' | 'Pineapple milk',
+      price: Number(form.get('price')),
       packType: submittedPackType || undefined,
       piecesPerPack: submittedPackType ? Number(form.get('piecesPerPack')) : undefined,
       packWeightKg: submittedPackType ? Number(form.get('packWeightKg')) : undefined,
@@ -325,6 +330,7 @@ function ProductDialog({ product, materials, message, onClose, onSave, disabled 
           <Field label="Outer pack type"><select name="packType" value={packType} onChange={(event) => setPackType(event.target.value as '' | 'Box' | 'Carton')} className={inputClass}><option value="">Not specified</option><option value="Box">Box</option><option value="Carton">Carton</option></select></Field>
           <Field label="Pieces per box/carton"><input name="piecesPerPack" type="number" min="1" step="1" required={Boolean(packType)} disabled={!packType} defaultValue={product?.piecesPerPack} className={inputClass} placeholder="e.g. 24" /></Field>
           <Field label="Net product weight per box/carton (kg)"><input name="packWeightKg" type="number" min="0.001" step="any" required={Boolean(packType)} disabled={!packType} defaultValue={product?.packWeightKg} className={inputClass} placeholder="e.g. 4.8" /></Field>
+          <Field label="Selling price per box/carton (UGX)"><input required name="price" type="number" min="1" step="1" defaultValue={product?.price} className={inputClass} placeholder="e.g. 24000" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Sales uses this whole-UGX catalog price per outer pack.</span></Field>
           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 sm:col-span-2"><input type="checkbox" checked={recipeRequired} onChange={(event) => setRecipeRequired(event.target.checked)} className="size-4 accent-primary" /> Production requires a recipe</label>
         </div>
         <section className="space-y-3">
@@ -358,14 +364,14 @@ function FinishedStockView({ products, movements, onSubmit, disabled }: { produc
 
 function ProductionHistory({ runs, onSelect }: { runs: ProductionRunRecord[]; onSelect: (run: ProductionRunRecord) => void }) {
   if (!runs.length) return <EmptyState title="No production records" detail="Post a daily production record to see it here." />
-  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Opening', 'Sales', 'Damage', 'Closing', 'Produced', 'Recipe', 'Reference', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{runs.map((run) => <tr key={run.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3">{formatDate(run.productionDate)}</td><td className="px-3 py-3 font-semibold">{run.productName}</td><td className="px-3 py-3">{run.openingStockPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.salesQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.damagedQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.closingStockPieces.toLocaleString()} pcs</td><td className="px-3 py-3 font-bold text-primary">{run.producedQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.recipeVersion ? `v${run.recipeVersion}` : 'No recipe'}</td><td className="px-3 py-3 font-semibold">{run.reference}</td><td className="px-3 py-3"><button type="button" onClick={() => onSelect(run)} aria-label={`View production record ${run.reference}`} className="grid size-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100"><Icons.Eye className="size-4" /></button></td></tr>)}</tbody></table></div>
+  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Opening', 'Legacy sales', 'Damage', 'Closing', 'Produced', 'Recipe', 'Reference', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{runs.map((run) => <tr key={run.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3">{formatDate(run.productionDate)}</td><td className="px-3 py-3 font-semibold">{run.productName}</td><td className="px-3 py-3">{run.openingStockPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.salesQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.damagedQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.closingStockPieces.toLocaleString()} pcs</td><td className="px-3 py-3 font-bold text-primary">{run.producedQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.recipeVersion ? `v${run.recipeVersion}` : 'No recipe'}</td><td className="px-3 py-3 font-semibold">{run.reference}</td><td className="px-3 py-3"><button type="button" onClick={() => onSelect(run)} aria-label={`View production record ${run.reference}`} className="grid size-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100"><Icons.Eye className="size-4" /></button></td></tr>)}</tbody></table></div>
 }
 
 function ProductionRunDetails({ run, onClose }: { run: ProductionRunRecord; onClose: () => void }) {
   return <div className="fixed inset-0 z-80 grid place-items-center bg-slate-950/45 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section role="dialog" aria-modal="true" aria-labelledby="production-run-detail-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-2xl">
       <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><p className="text-xs text-slate-400">{run.reference} · {formatDate(run.productionDate)}</p><h2 id="production-run-detail-title" className="mt-1 text-base font-bold">{run.productName}</h2></div><button type="button" aria-label="Close production details" onClick={onClose} className="grid size-8 place-items-center rounded-md text-slate-400"><Icons.X className="size-4" /></button></header>
-      <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3"><Detail label="Opening stock" value={`${run.openingStockPieces.toLocaleString()} pcs`} /><Detail label="Sales / dispatched" value={`${run.salesQuantityPieces.toLocaleString()} pcs`} /><Detail label="Damage" value={`${run.damagedQuantityPieces.toLocaleString()} pcs`} /><Detail label="Closing stock" value={`${run.closingStockPieces.toLocaleString()} pcs`} /><Detail label="Produced" value={`${run.producedQuantityPieces.toLocaleString()} pcs`} /><Detail label="Recipe" value={run.recipeVersion ? `Version ${run.recipeVersion}` : 'No recipe'} /></div>
+      <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3"><Detail label="Opening stock" value={`${run.openingStockPieces.toLocaleString()} pcs`} /><Detail label="Legacy sales entries" value={`${run.salesQuantityPieces.toLocaleString()} pcs`} /><Detail label="Damage" value={`${run.damagedQuantityPieces.toLocaleString()} pcs`} /><Detail label="Closing stock" value={`${run.closingStockPieces.toLocaleString()} pcs`} /><Detail label="Produced" value={`${run.producedQuantityPieces.toLocaleString()} pcs`} /><Detail label="Recipe" value={run.recipeVersion ? `Version ${run.recipeVersion}` : 'No recipe'} /></div>
       <p className="border-t border-slate-100 px-5 py-4 text-xs text-slate-500">Raw-material usage is recorded separately in Raw Material Management using the number of 1,000-litre tanks made.</p>
       {run.damageReason && <p className="border-t border-slate-100 px-5 py-4 text-xs"><span className="font-semibold">Damage reason:</span> {run.damageReason}</p>}
       <footer className="flex justify-end border-t border-slate-100 px-5 py-4"><button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Close</button></footer>

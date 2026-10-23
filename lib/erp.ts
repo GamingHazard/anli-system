@@ -1,7 +1,31 @@
 export type Status = 'Paid' | 'Pending' | 'Overdue' | 'Approved' | 'Draft' | 'Active' | 'Inactive'
 
-export type Sale = { id: string; date: string; customer: string; customerId?: string; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string }
-export type SalePayment = { id: string; saleId: string; amount: number; date: string; method: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Check'; txnID?: string; note?: string; recordedAt: string }
+export type SaleLine = { productId: string; productCode: string; productName: string; packType: 'Box' | 'Carton'; piecesPerPack: number; packs: number; quantityPieces: number; catalogPricePerPack: number; pricePerPack: number; overrideReason?: string; lineTotal: number }
+export type SalePartySnapshot = { name: string; contact?: string; phone?: string; email?: string; address?: string; tin?: string }
+export type SaleCompanySnapshot = { name: string; email?: string; phone?: string; address?: string; logoUrl?: string }
+export type Sale = { id: string; date: string; customer: string; customerId?: string; assignedTo?: string | null; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Paid now' | 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string; receiptNumber?: string; lines?: SaleLine[]; customerSnapshot?: SalePartySnapshot; companySnapshot?: SaleCompanySnapshot; paidAmount?: number; payments?: SalePayment[]; legacyImported?: boolean }
+export type SalePayment = { id: string; saleId: string; paymentReceiptNumber?: string; amount: number; date: string; method: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Check' | 'Card' | 'Legacy'; txnID?: string; note?: string; recordedAt: string }
+export type ManagedReceipt = {
+  id: string
+  kind: 'sale' | 'credit-payment'
+  receiptNumber: string
+  date: string
+  amount: number
+  customer: SalePartySnapshot
+  company: SaleCompanySnapshot
+  lines: SaleLine[]
+  payments?: Array<{ receiptNumber: string; date: string; amount: number; method: string; txnID?: string }>
+  saleReceiptNumber?: string
+  saleId: string
+  payment?: { amount: number; method: string; txnID?: string; note?: string }
+  total?: number
+  paidAmount?: number
+  balance?: number
+  isFavorite: boolean
+  isArchived: boolean
+  archivedAt?: string | null
+}
+export type ReceiptStats = { count: number; totalAmount: number; totalPaid: number; outstanding: number }
 export type InvoiceStatus = 'Draft' | 'Ready to submit' | 'Submitted' | 'Issued' | 'Failed' | 'Cancelled' | 'Credit note'
 export type InvoiceLine = { id: string; description: string; quantity: number; unitPrice: number; lineTotal: number; taxCategory?: string; taxRate?: number; taxAmount?: number }
 export type InvoicePartySnapshot = { name: string; tin?: string; email?: string; phone?: string; address?: string; logoUrl?: string }
@@ -15,11 +39,12 @@ export type Invoice = {
   events: InvoiceEvent[]; createdAt: string; updatedAt: string
 }
 export type OrderStatus = 'Pending' | 'Confirmed' | 'In progress' | 'Ready' | 'Completed' | 'Cancelled'
-export type OrderItem = { id: string; product: string; quantity: number; unitPrice: number; lineTotal: number }
-export type OrderStatusChange = { status: OrderStatus; at: string }
+export type OrderItem = { id: string; product: string; quantity: number; unitPrice: number; lineTotal: number; productId?: string; productCode?: string; packType?: 'Box' | 'Carton'; piecesPerPack?: number; overrideReason?: string }
+export type OrderStatusChange = { status: OrderStatus; at: string; type?: string; actor?: string; reason?: string }
 export type Order = {
   id: string
   reference: string
+  orderNumber?: string
   date: string
   createdAt: string
   customer: string
@@ -30,6 +55,7 @@ export type Order = {
   fulfilmentMethod: 'Delivery' | 'Pickup'
   destination: string
   paymentTerms: 'Paid now' | 'Same-day' | 'Credit'
+  dueDate?: string
   status: OrderStatus
   statusHistory: OrderStatusChange[]
   completedAt?: string
@@ -37,6 +63,10 @@ export type Order = {
   priorityReason?: string
   archivedAt?: string
   notes: string
+  paidAmount?: number
+  reserved?: boolean
+  saleId?: string
+  legacyImported?: boolean
 }
 export type EmployeeCategory = 'Staff employee' | 'Casual worker' | 'Other' | 'Staff' | 'Casual'
 export type EmployeeDocument = { id?: string; title: string; url: string; publicId?: string; download_Url: string; fileName?: string; uploadedAt?: string }
@@ -236,7 +266,8 @@ export type SalaryAdvance = {
 export type ExpenseAttachment = { id: string; name: string; dataUrl: string; mediaType: string; sizeBytes: number }
 export type ExpenseStatus = 'Pending approval' | 'Approved' | 'Rejected' | 'Paid' | 'Pending'
 export type ExpenseDecision = { id: string; decision: 'Approved' | 'Rejected'; actor: string; at: string; note?: string }
-export type Expense = { id: string; reference: string; category: string; description: string; amount: number; date: string; status: ExpenseStatus; department: string; expenseType?: 'Supplier bill' | 'Employee reimbursement' | 'Petty cash / other'; payee?: string; attachments?: ExpenseAttachment[]; requestedBy?: string; createdAt?: string; decisions?: ExpenseDecision[]; rejectionReason?: string }
+export type UgandaTaxType = 'Value Added Tax (VAT) - non-recoverable input tax' | 'Corporation tax' | 'Presumptive tax' | 'Pay As You Earn (PAYE)' | 'Withholding tax' | 'Excise duty' | 'Import / customs duty' | 'Stamp duty' | 'Local Service Tax (LST)' | 'Property rates' | 'Tax penalty or interest' | 'Other tax'
+export type Expense = { id: string; reference: string; category: string; description: string; amount: number; date: string; status: ExpenseStatus; department: string; expenseType?: 'Supplier bill' | 'Employee reimbursement' | 'Petty cash / other'; payee?: string; taxType?: UgandaTaxType; attachments?: ExpenseAttachment[]; requestedBy?: string; createdAt?: string; decisions?: ExpenseDecision[]; rejectionReason?: string }
 export type Customer = {
   id: string
   name: string
@@ -260,7 +291,7 @@ export type RecipeIngredient = { materialId: string; quantityPerTank: number }
 export type ProductionRecipe = { id: string; productName: string; tankUnit: string; ingredients: RecipeIngredient[]; createdAt: string; updatedAt: string }
 export type ProductionRunLine = { materialId: string; materialName: string; quantityPerTank: number; totalQuantity: number; unit: string }
 export type ProductionRun = { id: string; reference: string; recipeId: string; productId?: string; productName: string; productUnit?: string; productionDate: string; tankCount: number; producedQuantity?: number; openingStock?: number; salesQuantity?: number; damagedQuantity?: number; closingStock?: number; damageReason?: string; salesSource: 'Manual'; location: string; lines: ProductionRunLine[]; recordedAt: string; actor: string }
-export type FinishedProduct = { id: string; code: string; name: string; category: string; unit: string; flavour?: 'Mango' | 'Pineapple milk'; packType?: 'Box' | 'Carton'; piecesPerPack?: number; packWeightKg?: number; recipeId?: string; recipeRequired: boolean; active: boolean; createdAt: string; updatedAt: string }
+export type FinishedProduct = { id: string; code: string; name: string; category: string; unit: string; flavour?: 'Mango' | 'Pineapple milk'; packType?: 'Box' | 'Carton'; piecesPerPack?: number; packWeightKg?: number; price?: number; recipeId?: string; recipeRequired: boolean; active: boolean; createdAt: string; updatedAt: string }
 export type FinishedStockMovementType = 'Opening balance' | 'Production' | 'Sales dispatch' | 'Damage/write-off' | 'Internal use/sample' | 'Transfer in' | 'Transfer out' | 'Other stock in' | 'Adjustment increase' | 'Adjustment decrease'
 export type FinishedStockMovement = { id: string; reference: string; productId: string; type: FinishedStockMovementType; quantity: number; date: string; recordedAt: string; reason?: string; note?: string; actor: string }
 export type AssetCategory = 'Office assets' | 'Vehicles' | 'Production assets' | 'Store' | 'Machinery' | 'Others'
@@ -273,11 +304,13 @@ export type CompanyAsset = {
   acquisitionDate?: string; acquisitionCost?: number; supplier?: string; warrantyEnd?: string
   location: string; assignee?: string; department?: string; condition: AssetCondition; status: AssetStatus
   conditionNotes?: string; nextInspectionDate?: string; nextServiceDate?: string; insuranceDueDate?: string
-  notes?: string; createdAt: string; updatedAt: string
+  notes?: string; photos?: Array<{ id: string; url: string; filename?: string; uploadedAt?: string }>
+  createdAt: string; updatedAt: string
 }
-export type AssetEventType = 'Acquired' | 'Inspection' | 'Transfer' | 'Assignment' | 'Maintenance' | 'Status change' | 'Disposed'
+export type AssetEventType = 'Acquired' | 'Inspection' | 'Transfer' | 'Assignment' | 'Maintenance' | 'Maintenance completed' | 'Profile correction' | 'Status change' | 'Disposed'
 export type AssetEvent = {
   id: string; assetId: string; type: AssetEventType; date: string; recordedAt: string; actor: string
+  title?: string; description?: string
   reference?: string; fromLocation?: string; toLocation?: string; fromAssignee?: string; toAssignee?: string
   previousCondition?: AssetCondition; newCondition?: AssetCondition; previousStatus?: AssetStatus; newStatus?: AssetStatus
   reason?: string; note?: string; provider?: string; cost?: number; nextInspectionDate?: string; nextServiceDate?: string
@@ -323,6 +356,15 @@ export const createInvoiceDraft = (sale: Sale, customer: Customer | undefined, p
   const unitPrice = sale.total / quantity
   const seller = createInvoiceSellerSnapshot(profile)
   const buyerAddress = [customer?.district, customer?.region, customer?.country].filter(Boolean).join(', ')
+  const lines = sale.lines?.length
+    ? sale.lines.map((line, index) => ({
+        id: `${sale.id}-LINE-${index + 1}`,
+        description: `${line.productName} · ${line.packs} ${line.packType.toLowerCase()}${line.packs === 1 ? '' : 's'}`,
+        quantity: line.packs,
+        unitPrice: line.pricePerPack,
+        lineTotal: line.lineTotal,
+      }))
+    : [{ id: `${sale.id}-LINE-1`, description: sale.product, quantity, unitPrice, lineTotal: sale.total }]
   return {
     id: `INV-${sale.id}`,
     invoiceNumber: `INV-${sale.id}`,
@@ -335,7 +377,7 @@ export const createInvoiceDraft = (sale: Sale, customer: Customer | undefined, p
     paymentTerms: sale.paymentTerms || 'Same-day',
     seller,
     buyer: { name: sale.customer, tin: customer?.tin || undefined, email: customer?.email || undefined, phone: customer?.phone || undefined, address: buyerAddress || undefined },
-    lines: [{ id: `${sale.id}-LINE-1`, description: sale.product, quantity, unitPrice, lineTotal: sale.total }],
+    lines,
     subtotal: sale.total,
     total: sale.total,
     events: [{ id: `${sale.id}-INVOICE-DRAFT`, type: 'Draft created', at: now, actor: 'System', note: 'Automatic invoice draft created from sale.' }],
@@ -693,7 +735,7 @@ const normalizeFinishedStockMovements = (value: unknown): FinishedStockMovement[
 const assetCategories: AssetCategory[] = ['Office assets', 'Vehicles', 'Production assets', 'Store', 'Machinery', 'Others']
 const assetConditions: AssetCondition[] = ['Good', 'Fair', 'Needs repair', 'Unserviceable']
 const assetStatuses: AssetStatus[] = ['Active', 'Under maintenance', 'Disposed']
-const assetEventTypes: AssetEventType[] = ['Acquired', 'Inspection', 'Transfer', 'Assignment', 'Maintenance', 'Status change', 'Disposed']
+const assetEventTypes: AssetEventType[] = ['Acquired', 'Inspection', 'Transfer', 'Assignment', 'Maintenance', 'Maintenance completed', 'Profile correction', 'Status change', 'Disposed']
 const optionalDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined
 
 const normalizeAssets = (value: unknown): CompanyAsset[] => {
@@ -894,6 +936,7 @@ const normalizeOrder = (value: unknown, index: number): Order => {
     fulfilmentMethod,
     destination: String(legacy.destination || legacy.notes || ''),
     paymentTerms,
+    dueDate: typeof legacy.dueDate === 'string' ? legacy.dueDate : undefined,
     status,
     statusHistory,
     priority: legacy.priority === 'High' ? 'High' : 'Normal',
@@ -904,11 +947,27 @@ const normalizeOrder = (value: unknown, index: number): Order => {
   }
 }
 
-const linkCustomerTransactions = (state: ErpState): ErpState => ({
+const normalizedCustomerName = (name: string) =>
+  name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US')
+
+const resolveCustomerId = (
+  customerId: string | undefined,
+  name: string,
+  customers: Customer[],
+) => {
+  if (customerId && customers.some((customer) => customer.id === customerId)) {
+    return customerId
+  }
+  const matches = customers.filter(
+    (customer) => normalizedCustomerName(customer.name) === normalizedCustomerName(name),
+  )
+  return matches.length === 1 ? matches[0].id : undefined
+}
+
+export const linkCustomerTransactions = (state: ErpState): ErpState => ({
   ...state,
   sales: state.sales.map((sale) => {
-    const customerId = sale.customerId || state.customers.find((customer) =>
-      customer.name.trim().toLowerCase() === sale.customer.trim().toLowerCase())?.id
+    const customerId = resolveCustomerId(sale.customerId, sale.customer, state.customers)
     return {
       ...sale,
       customerId,
@@ -917,8 +976,7 @@ const linkCustomerTransactions = (state: ErpState): ErpState => ({
   }),
   orders: state.orders.map((order) => ({
     ...order,
-    customerId: order.customerId || state.customers.find((customer) =>
-      customer.name.trim().toLowerCase() === order.customer.trim().toLowerCase())?.id,
+    customerId: resolveCustomerId(order.customerId, order.customer, state.customers),
   })),
 })
 
@@ -1027,7 +1085,7 @@ export const loadState = (): ErpState => {
     const state = linkCustomerTransactions({ ...defaults, ...parsed, customers, sales, invoices, payments, orders, employees, employeeDrafts, attendanceRecords, leaveRequests, payrollRuns, salaryAdvances, materials, stockMovements, productionRecipes, productionRuns, finishedProducts, finishedStockMovements, assets, assetEvents, companyProfile })
     state.materials = state.materials.map((material) => ({ ...material, quantity: Math.max(0, stockQuantityAtLocation(material.id, stockMovements)) }))
     if (attendancePreserved) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, employees: [], employeeDrafts: [], attendanceRecords: [], salaryAdvances: [], companyProfile: emptyCompanyProfile }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, assets: parsed.assets, assetEvents: parsed.assetEvents, employees: [], employeeDrafts: [], attendanceRecords: [], salaryAdvances: [], companyProfile: emptyCompanyProfile }))
     }
     return state
   } catch {
@@ -1329,7 +1387,17 @@ export const saveState = (state: ErpState) => {
   const saved = window.localStorage.getItem(STORAGE_KEY)
   if (saved) preserveLegacySalaryAdvanceData(saved)
   const preserved = !saved || preserveLegacyAttendanceData(saved)
-  const payload: ErpState = { ...state, employees: [], employeeDrafts: [], attendanceRecords: [], salaryAdvances: [], companyProfile: emptyCompanyProfile }
+  const payload: Partial<ErpState> = { ...state, employees: [], employeeDrafts: [], attendanceRecords: [], salaryAdvances: [], companyProfile: emptyCompanyProfile }
+  try {
+    const previous = saved ? JSON.parse(saved) as Partial<ErpState> : {}
+    if (Array.isArray(previous.assets)) payload.assets = previous.assets
+    else delete payload.assets
+    if (Array.isArray(previous.assetEvents)) payload.assetEvents = previous.assetEvents
+    else delete payload.assetEvents
+  } catch {
+    delete payload.assets
+    delete payload.assetEvents
+  }
   if (!preserved && saved) {
     try {
       const previous = JSON.parse(saved) as Partial<ErpState>
@@ -1341,6 +1409,33 @@ export const saveState = (state: ErpState) => {
     }
   }
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+}
+export const getSavedCustomersForImport = (): Customer[] => {
+  if (typeof window === 'undefined') return []
+  const saved = window.localStorage.getItem(STORAGE_KEY)
+  if (!saved) return []
+  let parsed: Partial<ErpState>
+  try {
+    parsed = JSON.parse(saved) as Partial<ErpState>
+  } catch {
+    throw new Error('Saved browser data could not be read for customer import.')
+  }
+  return Array.isArray(parsed.customers) ? parsed.customers : []
+}
+export const getSavedSalesForImport = (): { sales: Sale[]; payments: SalePayment[] } => {
+  if (typeof window === 'undefined') return { sales: [], payments: [] }
+  const saved = window.localStorage.getItem(STORAGE_KEY)
+  if (!saved) return { sales: [], payments: [] }
+  let parsed: Partial<ErpState>
+  try {
+    parsed = JSON.parse(saved) as Partial<ErpState>
+  } catch {
+    throw new Error('Saved browser data could not be read for sales import.')
+  }
+  return {
+    sales: Array.isArray(parsed.sales) ? parsed.sales : [],
+    payments: Array.isArray(parsed.payments) ? parsed.payments : [],
+  }
 }
 export const clearState = () => { if (typeof window !== 'undefined') { window.localStorage.removeItem(STORAGE_KEY); window.localStorage.removeItem(LEGACY_EMPLOYEE_IMPORT_KEY); window.localStorage.removeItem(LEGACY_ATTENDANCE_KEY); window.localStorage.removeItem(LEGACY_SALARY_ADVANCE_KEY); window.localStorage.removeItem(LEGACY_LEAVE_IMPORT_KEY) } }
 export const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
