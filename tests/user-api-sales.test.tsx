@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSale, getCreditCustomerStatement, getCreditReminderSettings, importLegacySales, listCreditNotifications, listSalesOwners, markCreditNotificationRead, updateCreditReminderSettings, updateCreditSale } from '@/lib/user-api'
+import { createSale, getCreditCustomerStatement, getCreditReminderSettings, importLegacySales, listNotifications, listSalesOwners, markAllNotificationsRead, markNotificationRead, updateCreditReminderSettings, updateCreditSale } from '@/lib/user-api'
 import type { Sale, SalePayment } from '@/lib/erp'
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -114,28 +114,51 @@ describe('sales API client', () => {
     )
   })
 
-  it('loads and marks credit due notifications read', async () => {
+  it('loads and marks generalized notifications read', async () => {
     const notification = {
       id: 'NOTICE-1',
-      type: 'credit_due' as const,
+      type: 'credit_due',
+      category: 'sales',
+      severity: 'action_required',
       title: 'Credit sale due in 7 days',
-      message: 'SAL-2026-000001 has an outstanding balance.',
-      saleId: saleResponse.id,
-      receiptNumber: saleResponse.receiptNumber,
-      dueDate: '2026-10-30',
-      balance: 12000,
+      message: 'A credit sale is approaching its due date.',
+      resource: { type: 'sale', id: saleResponse.id, reference: saleResponse.receiptNumber },
+      occurredAt: '2026-10-23T10:00:00.000Z',
       readAt: null,
+      expiresAt: null,
       createdAt: '2026-10-23T10:00:00.000Z',
     }
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ notifications: [notification], unreadCount: 1 }))
-      .mockResolvedValueOnce(jsonResponse({ notification: { ...notification, readAt: '2026-10-23T11:00:00.000Z' } }))
+      .mockResolvedValueOnce(jsonResponse({ notifications: [notification], unreadCount: 1, nextCursor: null }))
+      .mockResolvedValueOnce(jsonResponse({ notification: { ...notification, readAt: '2026-10-23T11:00:00.000Z' }, unreadCount: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ updated: 1, unreadCount: 0 }))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(listCreditNotifications()).resolves.toMatchObject({ unreadCount: 1, notifications: [notification] })
-    await expect(markCreditNotificationRead(notification.id)).resolves.toMatchObject({
+    await expect(listNotifications()).resolves.toMatchObject({ unreadCount: 1, notifications: [notification] })
+    await expect(markNotificationRead(notification.id)).resolves.toMatchObject({
       notification: { id: notification.id, readAt: '2026-10-23T11:00:00.000Z' },
     })
     expect(fetchMock.mock.calls[1]?.[0]).toContain('/notifications/NOTICE-1/read')
+    await expect(markAllNotificationsRead()).resolves.toMatchObject({ updated: 1, unreadCount: 0 })
+  })
+
+  it('serializes notification filters and cursors as query parameters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      notifications: [],
+      unreadCount: 0,
+      nextCursor: null,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listNotifications({
+      limit: 30,
+      cursor: '507f1f77bcf86cd799439021',
+      unread: true,
+      category: 'action_required',
+    })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      '/notifications?limit=30&cursor=507f1f77bcf86cd799439021&unread=true&category=action_required',
+    )
   })
 
   it('updates credit review details and loads customer statement and owners', async () => {

@@ -49,47 +49,53 @@ export type SessionProtectionSettings = {
   warningPeriod: number
 }
 
+export type DashboardAvailability =
+  | { status: 'unavailable'; message: string }
+  | ({ status: 'available' } & Record<string, unknown>)
+
+export type DashboardSummary = {
+  version: 1
+  range: { from: string; to: string; timeZone: string }
+  generatedAt: string
+  sections: {
+    sales?: DashboardAvailability & {
+      revenue?: number
+      collected?: number
+      outstanding?: number
+      overdueReceivables?: number
+      trend?: Array<{ date: string; revenue: number; collected: number }>
+      products?: Array<{ name: string; revenue: number }>
+    }
+    orders?: DashboardAvailability & {
+      open?: number
+      late?: number
+      highPriority?: number
+      byStatus?: Array<{ status: string; count: number }>
+    }
+    production?: DashboardAvailability & {
+      produced?: number
+      damaged?: number
+      trend?: Array<{ date: string; produced: number; damaged: number }>
+    }
+    inventory?: DashboardAvailability & { activeLowStock?: number }
+    expenses?: DashboardAvailability & {
+      total?: number
+      pendingApproval?: number
+      trend?: Array<{ date: string; amount: number }>
+    }
+    people?: DashboardAvailability & {
+      attendanceByStatus?: Array<{ status: string; count: number }>
+      recordedAttendance?: number
+      pendingLeave?: number
+    }
+    assets?: DashboardAvailability & { dueMaintenance?: number }
+  }
+}
+
 export type CompanyLogo = { url: string; publicId: string }
 export type PublicCompanyBrand = { companyName: string; logoUrl: string }
 
-export const AUDIT_EVENT_TYPES = [
-  'auth.login.succeeded',
-  'auth.login.failed',
-  'auth.login.rejected_suspended',
-  'auth.login.rejected_deactivated',
-  'auth.login.temporary_password_expired',
-  'auth.logout',
-  'auth.password_changed',
-  'account.created',
-  'account.updated',
-  'account.status_changed',
-  'account.password_reset',
-  'session.revoked',
-  'session.idle_expired',
-  'session.absolute_expired',
-  'security.session_policy_updated',
-  'security.authorization_denied',
-  'company.profile_updated',
-  'customer.created',
-  'customer.updated',
-  'customer.status_changed',
-  'customer.archived',
-  'customer.restored',
-  'customer.legacy_imported',
-  'leave.policy_updated',
-  'leave.routing_updated',
-  'leave.requested',
-  'leave.approved',
-  'leave.rejected',
-  'leave.cancelled',
-  'leave.amendment_requested',
-  'leave.amendment_approved',
-  'leave.amendment_rejected',
-  'leave.return_confirmed',
-  'leave.legacy_imported',
-] as const
-
-export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number]
+export type AuditEventType = string
 export type AuditEvent = {
   id: string
   eventType: AuditEventType
@@ -97,6 +103,7 @@ export type AuditEvent = {
   reason?: string
   actor: { id: string; name?: string; roles: UserRole[] } | null
   target: { id: string; name?: string; email?: string } | null
+  resource?: { type: string; id?: string; reference?: string } | null
   sessionId: string | null
   ipAddress?: string
   userAgent?: string
@@ -106,9 +113,11 @@ export type AuditEvent = {
 
 export type AuditFilters = {
   eventType?: AuditEventType
+  category?: string
   outcome?: AuditEvent['outcome']
   actorId?: string
   targetUserId?: string
+  resourceType?: string
   from?: string
   to?: string
   limit?: number
@@ -785,18 +794,27 @@ export async function recordSalePayment(id: string, input: Omit<CreateSaleInput,
   return { payment: normalizeSalePayment(result.payment), payments: result.payments.map(normalizeSalePayment), replayed: result.replayed ?? false }
 }
 
-export type CreditNotification = {
+export type NotificationCategory = 'approval' | 'leave' | 'payroll' | 'salary_advance' | 'expense' | 'inventory' | 'sales' | 'security' | 'general'
+export type NotificationSeverity = 'info' | 'action_required' | 'urgent'
+export type NotificationRecord = {
   id: string
-  type: 'credit_due' | 'credit_overdue'
+  type: string
+  category: NotificationCategory
+  severity: NotificationSeverity
   title: string
   message: string
-  saleId: string
-  receiptNumber: string
-  dueDate: string
-  balance: number
+  resource: { type: string; id: string; reference?: string }
+  occurredAt: string
   readAt: string | null
+  expiresAt: string | null
   createdAt: string
 }
+export type NotificationPage = {
+  notifications: NotificationRecord[]
+  unreadCount: number
+  nextCursor: string | null
+}
+
 export type CreditReminderSettings = {
   daysBeforeDue: number[]
   daysAfterDue: number[]
@@ -807,8 +825,24 @@ export type CreditReminderSettings = {
 
 export type SalesOwner = Pick<UserAccount, 'id' | 'name' | 'email' | 'roles'>
 
-export async function listCreditNotifications() {
-  return request<{ notifications: CreditNotification[]; unreadCount: number }>('/notifications?limit=50')
+export const NOTIFICATION_SOCKET_URL = apiBaseUrl.replace(/\/api\/?$/, '')
+
+export async function listNotifications(options: { limit?: number; cursor?: string; unread?: boolean; category?: 'action_required' } = {}) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 50) })
+  if (options.cursor) params.set('cursor', options.cursor)
+  if (options.unread) params.set('unread', 'true')
+  if (options.category) params.set('category', options.category)
+  return request<NotificationPage>(`/notifications?${params.toString()}`)
+}
+
+export async function markNotificationRead(id: string) {
+  return request<{ notification: NotificationRecord; unreadCount: number }>(`/notifications/${encodeURIComponent(id)}/read`, {
+    method: 'PATCH',
+  })
+}
+
+export async function markAllNotificationsRead() {
+  return request<{ updated: number; unreadCount: number }>('/notifications/read-all', { method: 'PATCH' })
 }
 
 export async function getCreditReminderSettings() {
@@ -820,10 +854,6 @@ export async function updateCreditReminderSettings(settings: Omit<CreditReminder
     method: 'PUT',
     body: JSON.stringify(settings),
   })
-}
-
-export async function markCreditNotificationRead(id: string) {
-  return request<{ notification: CreditNotification }>(`/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' })
 }
 
 export async function listSalesOwners() {
@@ -2206,6 +2236,11 @@ export async function getCurrentSession(): Promise<{ user: UserAccount; session:
   }
 }
 
+export function getDashboardSummary(from: string, to: string) {
+  const params = new URLSearchParams({ from, to })
+  return request<DashboardSummary>(`/dashboard/summary?${params}`)
+}
+
 export function signOut() {
   return request<void>('/auth/logout', { method: 'POST' })
 }
@@ -2254,6 +2289,10 @@ export function listAuditEvents(filters: AuditFilters = {}) {
     ? `/audit/users/${encodeURIComponent(targetUserId)}${suffix}`
     : `/audit${suffix}`
   return request<{ events: AuditEvent[]; nextCursor: string | null }>(path)
+}
+
+export async function listAuditEventTypes() {
+  return request<{ eventTypes: string[]; resourceTypes: string[]; categories: string[] }>('/audit/event-types')
 }
 
 export async function listUsers() {

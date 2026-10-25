@@ -1441,14 +1441,12 @@ export const clearState = () => { if (typeof window !== 'undefined') { window.lo
 export const createId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
 export const exportCsv = (filename: string, rows: Record<string, unknown>[]) => { if (!rows.length) return; const headers = Object.keys(rows[0]); const csv = [headers.join(','), ...rows.map(row => headers.map(header => JSON.stringify(row[header] ?? '')).join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url) }
 export const navGroups = [
-  { label: 'Overview', items: [{ label: 'Dashboard', icon: 'LayoutDashboard' }, { label: 'Approvals', icon: 'ClipboardCheck' }, { label: 'Invoicing', icon: 'FileText' }] },
-  { label: 'Sales Department', items: [{ label: 'Sales', icon: 'ShoppingCart' }, { label: 'Credit Sales', icon: 'HandCoins' }, { label: 'Orders', icon: 'ClipboardList' }, { label: 'Receipt Management', icon: 'ReceiptText' }, { label: 'Customer Management', icon: 'Users' }] },
+  { label: 'Overview', items: [{ label: 'Dashboard', icon: 'LayoutDashboard' }, { label: 'Approvals', icon: 'ClipboardCheck' }, { label: 'Auditing', icon: 'ScrollText' }, { label: 'Analysis', icon: 'ChartSpline' }] },
+  { label: 'Sales Department', items: [{ label: 'Sales', icon: 'ShoppingCart' }, { label: 'Credit Sales', icon: 'HandCoins' }, { label: 'Orders', icon: 'ClipboardList' }, { label: 'Invoicing', icon: 'FileText' }, { label: 'Receipt Management', icon: 'ReceiptText' }, { label: 'Customer Management', icon: 'Users' }] },
   { label: 'HR Department', items: [{ label: 'Employee Profiles', icon: 'ContactRound' }, { label: 'Attendance Management', icon: 'CalendarCheck' }, { label: 'Payroll Management', icon: 'WalletCards' }, { label: 'Salary Advance Management', icon: 'HandCoins' }, { label: 'Leave Management', icon: 'CalendarDays' }, { label: 'Disciplinary Letters', icon: 'ShieldAlert' }] },
   { label: 'Finance Department', items: [
     { label: 'Expenses', icon: 'Receipt' },
     // { label: 'Reporting', icon: 'ChartNoAxesCombined' },
-    { label: 'Analysis', icon: 'ChartSpline' },
-    { label: 'Auditing', icon: 'ScrollText' },
   ] },
   { label: 'Inventory Department', items: [{ label: 'Raw Material Management', icon: 'Boxes' }, { label: 'Production Management', icon: 'Factory' }, { label: 'Assets Management', icon: 'Building2' }, { label: 'Data Backup', icon: 'DatabaseBackup' }] },
   { label: 'Settings', items: [
@@ -1460,6 +1458,5 @@ export const navGroups = [
 ]
 export const allNavItems = navGroups.flatMap(group => group.items)
 export const chartData = [{ day: 'Mon', sales: 3.8, expenses: 1.2 }, { day: 'Tue', sales: 5.2, expenses: 1.7 }, { day: 'Wed', sales: 4.1, expenses: 1.1 }, { day: 'Thu', sales: 6.4, expenses: 2.2 }, { day: 'Fri', sales: 7.8, expenses: 1.8 }, { day: 'Sat', sales: 5.6, expenses: 1.4 }, { day: 'Sun', sales: 4.9, expenses: 1.1 }]
-export const productMix = [{ name: 'Maize Flour', value: 42 }, { name: 'Wheat Flour', value: 28 }, { name: 'Rice', value: 18 }, { name: 'Sugar', value: 12 }]
 export const initials = (name: string) => name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase()
 export { STORAGE_KEY }

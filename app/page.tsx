@@ -14,9 +14,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -24,7 +21,6 @@ import {
 } from "recharts";
 import * as Icons from "lucide-react";
 import {
-  Bell,
   Boxes,
   ChevronDown,
   ChevronLeft,
@@ -34,7 +30,6 @@ import {
   Menu,
   Plus,
   Search,
-  Settings2,
   Sparkles,
   TrendingUp,
   X,
@@ -47,6 +42,7 @@ import ProductionManagement from "@/components/production-management";
 import AssetManagement from "@/components/asset-management";
 import CompanyProfileManagement from "@/components/company-profile-management";
 import UserManagement from "@/components/user-management";
+import AuditWorkspace from "@/components/audit-workspace";
 import SecuritySettings from "@/components/security-settings";
 import Approvals from "@/components/approvals";
 import LeaveManagement from "@/components/leave-management";
@@ -54,6 +50,8 @@ import DisciplinaryLettersPage from "@/components/disciplinary-letters";
 import SalesManagementPage from "@/components/sales-management";
 import ReceiptManagementPage from "@/components/receipt-management";
 import OrdersManagement from "@/components/orders-management";
+import NotificationCenter from "@/components/notification-center";
+import DashboardOverview from "@/components/dashboard-overview";
 import { hasAnyDepartmentRole, hasDepartmentRole } from "@/lib/authorization";
 import { importLegacyCustomersOnce } from "@/lib/customer-migration";
 import { importLegacySalesOnce } from "@/lib/sales-migration";
@@ -71,7 +69,6 @@ import { useSalaryAdvances } from "@/lib/salary-advance-queries";
 import {
   balanceForSale,
   chartData,
-  cloneSeed,
   createId,
   createInvoiceDraft,
   createInvoiceSellerSnapshot,
@@ -90,7 +87,6 @@ import {
   navGroups,
   paidAmountForSale,
   paymentStateForSale,
-  productMix,
   saveState,
   seedState,
   simulate,
@@ -1280,13 +1276,6 @@ function App() {
           setCollapsed={setCollapsed}
           mobileNav={mobileNav}
           setMobileNav={setMobileNav}
-          onReset={() =>
-            updateState({
-              ...cloneSeed(),
-              customers: state.customers,
-              companyProfile: state.companyProfile,
-            })
-          }
           companyName={companyName}
           companyLogoUrl={companyLogoUrl}
           canReadAssets={assetCanRead}
@@ -1300,6 +1289,7 @@ function App() {
             active={active}
             setMobileNav={setMobileNav}
             currentUser={currentUser}
+            onNavigate={setActive}
             onLogout={handleLogout}
             onChangePassword={() => setShowChangePassword(true)}
           />
@@ -1330,13 +1320,31 @@ function App() {
                 </button>
               </div>
             )}
-            {active === "Dashboard" ? (
-              <Dashboard
-                state={state}
-                setActive={setActive}
+            {active === "Analysis" ? (
+              <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <h2 className="text-lg font-bold text-slate-900">Analysis</h2>
+                <p className="mt-2 text-sm text-slate-500">Coming soon!</p>
+              </section>
+            ) : active === "Auditing" ? (
+              <AuditWorkspace currentUser={currentUser} />
+            ) : active === "Dashboard" ? (
+              <DashboardOverview
                 companyName={companyName}
                 companyLogoUrl={companyLogoUrl}
                 userName={currentUser.name}
+                roles={currentUser.roles}
+                onNavigate={setActive}
+                onExportSales={() =>
+                  exportCsv(
+                    `${
+                      companyName
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, "-")
+                        .replace(/^-|-$/g, "") || "company"
+                    }-sales.csv`,
+                    state.sales as unknown as Record<string, unknown>[],
+                  )
+                }
               />
             ) : active === "Sales" || active === "Credit Sales" ? (
               !salesCanRead ? (
@@ -2496,7 +2504,6 @@ function Sidebar({
   setCollapsed,
   mobileNav,
   setMobileNav,
-  onReset,
   companyName,
   companyLogoUrl,
   canReadAssets,
@@ -2509,7 +2516,6 @@ function Sidebar({
   setCollapsed: (value: boolean) => void;
   mobileNav: boolean;
   setMobileNav: (value: boolean) => void;
-  onReset: () => void;
   companyName: string;
   companyLogoUrl: string;
   canReadAssets: boolean;
@@ -2581,11 +2587,12 @@ function Sidebar({
               </div>
               {group.items.map((item) => {
                 const Icon = iconMap[item.icon] || LayoutFallback;
-                const comingSoon = item.label === "Data Backup" || item.label === "Invoicing";
+                const comingSoon = ["Analysis", "Data Backup", "Invoicing"].includes(item.label);
                 return (
                   <button
                     key={item.label}
-                    title={collapsed ? item.label : undefined}
+                    title={collapsed && comingSoon ? `${item.label} (coming soon!)` : collapsed ? item.label : undefined}
+                    aria-label={comingSoon ? `${item.label} (coming soon!)` : item.label}
                     disabled={comingSoon}
                     onClick={() => setActive(item.label)}
                     className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${comingSoon ? "cursor-not-allowed text-slate-400" : active === item.label ? "bg-[#f1eafd] text-[#6d28d9]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
@@ -2608,18 +2615,6 @@ function Sidebar({
             </div>
           ))}
         </nav>
-        <div
-          className={`border-t border-slate-100 p-3 ${collapsed ? "lg:flex lg:justify-center" : ""}`}
-        >
-          <button
-            title="Reset demo data"
-            onClick={onReset}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-medium text-slate-500 hover:bg-slate-50"
-          >
-            <Settings2 className="size-[17px] text-slate-400" />
-            {!collapsed && <span>Reset demo data</span>}
-          </button>
-        </div>
       </aside>
     </>
   );
@@ -7033,12 +7028,14 @@ function Header({
   active,
   setMobileNav,
   currentUser,
+  onNavigate,
   onLogout,
   onChangePassword,
 }: {
   active: string;
   setMobileNav: (value: boolean) => void;
   currentUser: UserAccount;
+  onNavigate: (section: string) => void;
   onLogout: () => void;
   onChangePassword: () => void;
 }) {
@@ -7093,13 +7090,7 @@ function Header({
       </div>
       <div className="flex items-center gap-2 sm:gap-4">
         {/* <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 md:flex"><Search className="size-4 text-slate-400" /><input className="w-36 bg-transparent text-xs outline-none placeholder:text-slate-400" placeholder="Search anything..." /></div> */}
-        <button
-          aria-label="Notifications"
-          className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-        >
-          <Bell className="size-[19px]" />
-          <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#8b5cf6]" />
-        </button>
+        <NotificationCenter currentUser={currentUser} onNavigate={onNavigate} />
         <div className="hidden h-7 w-px bg-slate-200 sm:block" />
         <div ref={profileMenuRef} className="relative">
           <button
@@ -7161,269 +7152,6 @@ function Header({
   );
 }
 
-function Dashboard({
-  state,
-  setActive,
-  companyName,
-  companyLogoUrl,
-  userName,
-}: {
-  state: ErpState;
-  setActive: (value: string) => void;
-  companyName: string;
-  companyLogoUrl: string;
-  userName: string;
-}) {
-  const today = sum(
-    state.sales
-      .filter((s) => s.date === new Date().toISOString().slice(0, 10))
-      .map((s) => s.total),
-  );
-  const week = sum(
-    state.sales.filter((s) => isWithinDays(s.date, 7)).map((s) => s.total),
-  );
-  const month = sum(
-    state.sales.filter((s) => isWithinDays(s.date, 31)).map((s) => s.total),
-  );
-  const expenses = sum(
-    state.expenses.filter((e) => isWithinDays(e.date, 31)).map((e) => e.amount),
-  );
-  const stock = sum(state.materials.map((m) => m.quantity * m.cost));
-  return (
-    <div className="animate-in fade-in duration-300">
-      <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-[#f1eafd] px-3 py-1 text-[11px] font-semibold text-[#6d28d9]">
-            {companyLogoUrl ? (
-              <img
-                src={companyLogoUrl}
-                alt=""
-                className="size-5 rounded object-contain bg-white p-0.5"
-              />
-            ) : (
-              <Sparkles className="size-3.5" />
-            )}{" "}
-            Welcome, {userName.split(/\s+/)[0]}
-          </div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-            {companyName} overview
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Monitor your key operations and make informed decisions.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() =>
-              exportCsv(
-                `${
-                  companyName
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, "-")
-                    .replace(/^-|-$/g, "") || "company"
-                }-sales.csv`,
-                state.sales as unknown as Record<string, unknown>[],
-              )
-            }
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            <Download className="size-4" /> Export
-          </button>
-          <button
-            onClick={() => setActive("Sales")}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white shadow-sm shadow-purple-200 hover:bg-[#5b21b6]"
-          >
-            <Plus className="size-4" /> New sale
-          </button>
-        </div>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi
-          label="Today's sales"
-          value={money(today)}
-          change="+12.8%"
-          icon="TrendingUp"
-          tone="purple"
-          onClick={() => setActive("Sales")}
-        />
-        <Kpi
-          label="Monthly sales"
-          value={money(month)}
-          change="+8.4%"
-          icon="BarChart3"
-          tone="blue"
-          onClick={() => setActive("Sales")}
-        />
-        <Kpi
-          label="Monthly expenses"
-          value={money(expenses)}
-          change="-4.2%"
-          icon="ArrowDownRight"
-          tone="amber"
-          onClick={() => setActive("Expenses")}
-        />
-        <Kpi
-          label="Team members"
-          value={String(state.employees.length)}
-          change="2 pending leave"
-          icon="UsersRound"
-          tone="green"
-          onClick={() => setActive("Employee Profiles")}
-        />
-      </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.65fr_1fr]">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="mb-5 flex items-start justify-between">
-            <div>
-              <h3 className="text-sm font-bold">Sales performance</h3>
-              <p className="mt-1 text-xs text-slate-400">
-                Revenue and expenses for the last 7 days
-              </p>
-            </div>
-            <select className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 outline-none">
-              <option>This week</option>
-              <option>This month</option>
-            </select>
-          </div>
-          <div className="h-[260px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="salesFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.23} />
-                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid vertical={false} stroke="#eef0f4" />
-                <XAxis
-                  dataKey="day"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
-                  dy={10}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
-                  tickFormatter={(v) => `${v}m`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 10,
-                    fontSize: 12,
-                  }}
-                  formatter={(value: any) => [`${value ?? 0}m UGX`, "Sales"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="sales"
-                  stroke="#6d28d9"
-                  strokeWidth={2.5}
-                  fill="url(#salesFill)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="mt-4 flex items-center gap-5 text-[11px] text-slate-500">
-            <span className="flex items-center gap-2">
-              <span className="size-2 rounded-full bg-[#6d28d9]" />
-              Sales
-            </span>
-            <span className="flex items-center gap-2">
-              <span className="size-2 rounded-full bg-slate-300" />
-              Expenses
-            </span>
-            <span className="ml-auto font-semibold text-emerald-600">
-              {money(week)} this week
-            </span>
-          </div>
-        </section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="mb-2">
-            <h3 className="text-sm font-bold">Sales by product</h3>
-            <p className="mt-1 text-xs text-slate-400">
-              Share of current month revenue
-            </p>
-          </div>
-          <div className="relative h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={productMix}
-                  innerRadius={64}
-                  outerRadius={88}
-                  paddingAngle={3}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {productMix.map((_, index) => (
-                    <Cell
-                      key={index}
-                      fill={["#6d28d9", "#8b5cf6", "#c4b5fd", "#ede9fe"][index]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 grid place-items-center pointer-events-none">
-              <div className="text-center">
-                <div className="text-xl font-bold">100%</div>
-                <div className="text-[10px] text-slate-400">mix</div>
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {productMix.map((p, i) => (
-              <div
-                key={p.name}
-                className="flex items-center gap-2 text-[11px] text-slate-500"
-              >
-                <span
-                  className="size-2 rounded-full"
-                  style={{
-                    background: ["#6d28d9", "#8b5cf6", "#c4b5fd", "#ede9fe"][i],
-                  }}
-                />
-                {p.name}
-                <span className="ml-auto font-semibold text-slate-700">
-                  {p.value}%
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_1fr_1fr]">
-        <RecentSales state={state} setActive={setActive} />
-        <LowStock state={state} setActive={setActive} />
-        <Activity state={state} />
-      </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <MiniMetric
-          label="Raw material stock value"
-          value={money(stock)}
-          meta="4 tracked materials"
-          icon="Boxes"
-        />
-        <MiniMetric
-          label="Production today"
-          value="1,240 kg"
-          meta="92% of daily target"
-          icon="Factory"
-        />
-        <MiniMetric
-          label="Outstanding invoices"
-          value={money(4360000)}
-          meta="6 invoices awaiting payment"
-          icon="FileClock"
-        />
-      </div>
-    </div>
-  );
-}
 function Kpi({
   label,
   value,
@@ -8570,7 +8298,7 @@ function ModulePage({
           return leftOrder.createdAt.localeCompare(rightOrder.createdAt);
         })
       : filtered;
-  const isDashboardLike = ["Analysis", "Reporting"].includes(active);
+  const isDashboardLike = active === "Reporting";
   const updateOrder = (
     orderId: string,
     updates: Partial<ErpState["orders"][number]>,

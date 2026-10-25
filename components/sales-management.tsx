@@ -2,9 +2,9 @@
 
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, Download, Eye, Plus, Printer, Search, X } from 'lucide-react'
+import { Download, Eye, Plus, Printer, Search, X } from 'lucide-react'
 import { createId, exportCsv, formatDate, money, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
-import { ApiError, createSale, getCreditCustomerStatement, getCreditReminderSettings, listCreditNotifications, listProductionProducts, listSalesOwners, markCreditNotificationRead, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
+import { ApiError, createSale, getCreditCustomerStatement, getCreditReminderSettings, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
 
 type Props = {
   mode: 'sales' | 'credit'
@@ -449,7 +449,6 @@ export default function SalesManagementPage({
   const [settingsDraft, setSettingsDraft] = useState({ daysBeforeDue: '7, 1, 0', daysAfterDue: '1, 3, 7', repeatOverdueEveryDays: '7', escalateAfterDays: '7' })
   const [settingsError, setSettingsError] = useState('')
   const [settingsSaving, setSettingsSaving] = useState(false)
-  const [notificationError, setNotificationError] = useState('')
   const queryClient = useQueryClient()
   const [paymentDraft, setPaymentDraft] = useState<SalePaymentDraft>({ amount: 0, date: today(), method: 'Cash', txnID: '', note: '' })
   const paymentKey = useRef({ saleId: '', value: createId('PAY') })
@@ -463,12 +462,6 @@ export default function SalesManagementPage({
   const outstandingSales = visibleSales.filter((sale) => paidAmountForSale(sale.id, state.payments) < sale.total)
   const overdueSales = outstandingSales.filter((sale) => Boolean(sale.dueDate && sale.dueDate < today()))
   const paidSales = visibleSales.filter((sale) => paidAmountForSale(sale.id, state.payments) >= sale.total)
-  const creditNotifications = useQuery({
-    queryKey: ['credit-notifications'],
-    queryFn: listCreditNotifications,
-    enabled: mode === 'credit',
-    refetchInterval: 60_000,
-  })
   const salesOwners = useQuery({
     queryKey: ['sales-owners'],
     queryFn: listSalesOwners,
@@ -604,20 +597,6 @@ export default function SalesManagementPage({
         <div className="flex gap-2"><button type="button" onClick={() => exportCsv(mode === 'credit' ? 'credit-sales.csv' : 'sales.csv', visibleSales.map((sale) => ({ reference: sale.receiptNumber || sale.reference, customer: sale.customer, date: sale.date, products: sale.product, total: sale.total, paid: paidAmountForSale(sale.id, state.payments), balance: Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)), paymentTerms: sale.paymentTerms }))) } className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold"><Download className="size-4" /> Export CSV</button>{mode === 'sales' && canCreate && <button type="button" onClick={() => setShowForm(true)} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"><Plus className="size-4" /> Add sale</button>}</div>
       </header>
       {salesWarning && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">{salesWarning}</p>}
-      {mode === 'credit' && <section aria-label="Credit due notifications" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900"><Bell className="size-4" /> Due-date alerts <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px]">{creditNotifications.data?.unreadCount ?? 0} unread</span></div>
-        {creditNotifications.data?.notifications.length ? <div className="space-y-2">{creditNotifications.data.notifications.slice(0, 5).map((notification) => (
-          <button key={notification.id} type="button" onClick={() => {
-            setNotificationError('')
-            void markCreditNotificationRead(notification.id).then(() => queryClient.invalidateQueries({ queryKey: ['credit-notifications'] })).catch((error) => setNotificationError(errorMessage(error)))
-            const sale = state.sales.find((item) => item.id === notification.saleId)
-            if (sale) setReceiptSale(sale)
-          }} className={`block w-full rounded-lg border px-3 py-2 text-left text-xs ${notification.readAt ? 'border-amber-100 bg-white/60 text-amber-800' : 'border-amber-300 bg-white text-amber-950'}`}>
-            <span className="font-semibold">{notification.title}</span><span className="ml-2">{notification.receiptNumber} · Balance {money(notification.balance)}</span>
-          </button>
-        ))}</div> : <p className="text-xs text-amber-800">{creditNotifications.isLoading ? 'Loading reminders…' : 'No due-date alerts.'}</p>}
-        {(creditNotifications.isError || notificationError) && <p role="alert" className="mt-2 text-xs text-rose-700">{notificationError || 'Credit notifications could not be loaded.'}</p>}
-      </section>}
       {mode === 'sales' ? <section className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Sales today</div><div className="mt-1 font-bold">{money(sum(state.sales.filter((sale) => sale.date === today()).map((sale) => sale.total)))}</div></div>
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Outstanding balance</div><div className="mt-1 font-bold">{money(sum(state.sales.map((sale) => Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)))))}</div></div>
