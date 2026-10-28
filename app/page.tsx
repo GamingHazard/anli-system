@@ -199,7 +199,7 @@ function LoginScreen({
           </div>
           <div>
             <strong>{companyName}</strong>
-            <span>Business operating system</span>
+            <span>management system</span>
           </div>
         </div>
         <div className="secure-label">
@@ -209,19 +209,19 @@ function LoginScreen({
       <div className="login-content">
         <section className="login-intro">
           <div className="eyebrow">
-            <Icons.Sparkles /> Intelligent operations
+            <Icons.Sparkles /> Digictal operations
           </div>
           <h1>
-            Run your business
+            Anli Establishment
             <br />
-            <em>with clarity.</em>
+            <em> Management System.</em>
           </h1>
           <p>
-            One calm, connected workspace for your people, sales, finance and
-            operations.
+            A great paradigm shift to a new digital era to enhance business
+            operations with technology
           </p>
-          <div className="login-stat-row">
-            <div>
+          {/* <div className="login-stat-row ">
+            <div >
               <strong>360°</strong>
               <span>Business visibility</span>
             </div>
@@ -233,7 +233,7 @@ function LoginScreen({
               <strong>01</strong>
               <span>Unified workspace</span>
             </div>
-          </div>
+          </div> */}
         </section>
         <section className="login-card">
           <div className="login-card-glow" />
@@ -299,7 +299,17 @@ function LoginScreen({
       </div>
       <div className="login-footer">
         <span>© 2026 {companyName}</span>
-        <span>UGX · Africa/Kampala</span>
+        <span>
+          Developed by ·{" "}
+          <a
+            className="hover:text-blue-500 underline"
+            href="https://kisibojonathandev.vercel.app/about"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Jonathan
+          </a>
+        </span>
       </div>
     </main>
   );
@@ -802,20 +812,20 @@ function App() {
   const [state, setState] = useState<ErpState>(loadState);
   const customerCanRead = Boolean(
     currentUser &&
-      hasAnyDepartmentRole(currentUser.roles, [
-        "Sales Manager",
-        "Marketing Manager",
-        "General Manager",
-        "Admin",
-      ]),
+    hasAnyDepartmentRole(currentUser.roles, [
+      "Sales Manager",
+      "Marketing Manager",
+      "General Manager",
+      "Admin",
+    ]),
   );
   const customerCanManage = Boolean(
     currentUser &&
-      hasAnyDepartmentRole(currentUser.roles, [
-        "Sales Manager",
-        "General Manager",
-        "Admin",
-      ]),
+    hasAnyDepartmentRole(currentUser.roles, [
+      "Sales Manager",
+      "General Manager",
+      "Admin",
+    ]),
   );
   const selectedEmployee = state.employees.find(
     (item) => item.id === selectedId,
@@ -834,17 +844,17 @@ function App() {
   const [salesLoadAttempt, setSalesLoadAttempt] = useState(0);
   const salesCanRead = Boolean(
     currentUser &&
-      hasAnyDepartmentRole(currentUser.roles, [
-        "Sales Manager",
-        "General Manager",
-        "Super Admin",
-      ]),
+    hasAnyDepartmentRole(currentUser.roles, [
+      "Sales Manager",
+      "General Manager",
+      "Super Admin",
+    ]),
   );
   const [employeeLoadError, setEmployeeLoadError] = useState("");
   const [employeeDetailLoading, setEmployeeDetailLoading] = useState(false);
   const [employeeLoadAttempt, setEmployeeLoadAttempt] = useState(0);
   const [publicBrand, setPublicBrand] = useState<PublicCompanyBrand>({
-    companyName: "Lumina ERP",
+    companyName: "ANLI ESTABLISHMENT LTD",
     logoUrl: "",
   });
   const [companyProfileLoaded, setCompanyProfileLoaded] = useState(false);
@@ -872,12 +882,13 @@ function App() {
       .then((brand) => {
         if (mounted)
           setPublicBrand({
-            companyName: brand.companyName || "Lumina ERP",
+            companyName: brand.companyName || "ANLI WORKSPACE",
             logoUrl: brand.logoUrl || "",
           });
       })
       .catch(() => {
-        if (mounted) setPublicBrand({ companyName: "Lumina ERP", logoUrl: "" });
+        if (mounted)
+          setPublicBrand({ companyName: "ANLI WORKSPACE", logoUrl: "" });
       });
     return () => {
       mounted = false;
@@ -976,8 +987,7 @@ function App() {
           importLegacyCustomers,
         );
       } catch (error) {
-        migrationWarning =
-          `Customer import did not complete: ${error instanceof ApiError ? error.message : error instanceof Error ? error.message : "Unknown error."} Local data was retained.`;
+        migrationWarning = `Customer import did not complete: ${error instanceof ApiError ? error.message : error instanceof Error ? error.message : "Unknown error."} Local data was retained.`;
       }
       try {
         const customers = await listCustomers();
@@ -1166,17 +1176,14 @@ function App() {
       ],
     }));
   };
-  const updateCustomers = useCallback(
-    (customers: ErpState["customers"]) => {
-      setState((current) => {
-        const next = linkCustomerTransactions({ ...current, customers });
-        saveState(next);
-        return next;
-      });
-      queryClient.invalidateQueries();
-    },
-    [],
-  );
+  const updateCustomers = useCallback((customers: ErpState["customers"]) => {
+    setState((current) => {
+      const next = linkCustomerTransactions({ ...current, customers });
+      saveState(next);
+      return next;
+    });
+    queryClient.invalidateQueries();
+  }, []);
   const applyCompanyProfile = (companyProfile: CompanyProfile) => {
     setState((current) => {
       const next = {
@@ -1202,7 +1209,11 @@ function App() {
         publicBrand.companyName
       : publicBrand.companyName;
   const assetCanRead = Boolean(
-    currentUser && hasAnyDepartmentRole(currentUser.roles, ["Inventory Manager", "General Manager"]),
+    currentUser &&
+    hasAnyDepartmentRole(currentUser.roles, [
+      "Inventory Manager",
+      "General Manager",
+    ]),
   );
   const assetCanEdit = Boolean(
     currentUser && hasDepartmentRole(currentUser.roles, "Inventory Manager"),
@@ -1348,7 +1359,10 @@ function App() {
               />
             ) : active === "Sales" || active === "Credit Sales" ? (
               !salesCanRead ? (
-                <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                <section
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+                >
                   You do not have permission to access sales records.
                 </section>
               ) : (
@@ -1373,7 +1387,10 @@ function App() {
               )
             ) : active === "Receipt Management" ? (
               !salesCanRead ? (
-                <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                <section
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+                >
                   You do not have permission to access receipts.
                 </section>
               ) : (
@@ -1428,9 +1445,19 @@ function App() {
                   employee={selectedEmployee}
                   state={state}
                   updateState={updateState}
-                  canManage={hasAnyDepartmentRole(currentUser.roles, ["Admin", "Human Resource"])}
-                  canReadAdvances={hasAnyDepartmentRole(currentUser.roles, ["Admin", "Human Resource", "General Manager"])}
-                  canReadDisciplinary={hasAnyDepartmentRole(currentUser.roles, ["Human Resource", "General Manager"])}
+                  canManage={hasAnyDepartmentRole(currentUser.roles, [
+                    "Admin",
+                    "Human Resource",
+                  ])}
+                  canReadAdvances={hasAnyDepartmentRole(currentUser.roles, [
+                    "Admin",
+                    "Human Resource",
+                    "General Manager",
+                  ])}
+                  canReadDisciplinary={hasAnyDepartmentRole(currentUser.roles, [
+                    "Human Resource",
+                    "General Manager",
+                  ])}
                   onEmployeeUpdated={(employee) =>
                     setState((current) => ({
                       ...current,
@@ -1465,7 +1492,10 @@ function App() {
               )
             ) : active === "Customer Details" ? (
               !customerCanRead ? (
-                <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                <section
+                  role="alert"
+                  className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+                >
                   You do not have permission to view customer records.
                 </section>
               ) : !customersLoaded ? (
@@ -1475,7 +1505,10 @@ function App() {
               ) : selectedCustomer ? (
                 <>
                   {customerLoadError && (
-                    <p role="alert" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <p
+                      role="alert"
+                      className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+                    >
                       {customerLoadError}
                     </p>
                   )}
@@ -1486,11 +1519,17 @@ function App() {
                   />
                 </>
               ) : (
-                <section role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                  {customerLoadError || "This customer profile could not be found."}
+                <section
+                  role="alert"
+                  className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+                >
+                  {customerLoadError ||
+                    "This customer profile could not be found."}
                   <button
                     type="button"
-                    onClick={() => setCustomerLoadAttempt((attempt) => attempt + 1)}
+                    onClick={() =>
+                      setCustomerLoadAttempt((attempt) => attempt + 1)
+                    }
                     className="ml-3 font-semibold underline"
                   >
                     Retry
@@ -1522,7 +1561,10 @@ function App() {
                 }
               />
             ) : active === "Attendance Management" ? (
-              hasAnyDepartmentRole(currentUser.roles, ["Admin", "Human Resource"]) ? (
+              hasAnyDepartmentRole(currentUser.roles, [
+                "Admin",
+                "Human Resource",
+              ]) ? (
                 <AttendancePage
                   state={state}
                   employeesLoaded={employeesLoaded}
@@ -2587,12 +2629,24 @@ function Sidebar({
               </div>
               {group.items.map((item) => {
                 const Icon = iconMap[item.icon] || LayoutFallback;
-                const comingSoon = ["Analysis", "Data Backup", "Invoicing"].includes(item.label);
+                const comingSoon = [
+                  "Analysis",
+                  "Data Backup",
+                  "Invoicing",
+                ].includes(item.label);
                 return (
                   <button
                     key={item.label}
-                    title={collapsed && comingSoon ? `${item.label} (coming soon!)` : collapsed ? item.label : undefined}
-                    aria-label={comingSoon ? `${item.label} (coming soon!)` : item.label}
+                    title={
+                      collapsed && comingSoon
+                        ? `${item.label} (coming soon!)`
+                        : collapsed
+                          ? item.label
+                          : undefined
+                    }
+                    aria-label={
+                      comingSoon ? `${item.label} (coming soon!)` : item.label
+                    }
                     disabled={comingSoon}
                     onClick={() => setActive(item.label)}
                     className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${comingSoon ? "cursor-not-allowed text-slate-400" : active === item.label ? "bg-[#f1eafd] text-[#6d28d9]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
@@ -2603,7 +2657,11 @@ function Sidebar({
                     {!collapsed && (
                       <span className="flex min-w-0 items-center gap-1.5 truncate">
                         <span className="truncate">{item.label}</span>
-                        {comingSoon && <span className="shrink-0 text-[10px] font-medium text-slate-400">(coming soon!)</span>}
+                        {comingSoon && (
+                          <span className="shrink-0 text-[10px] font-medium text-slate-400">
+                            (coming soon!)
+                          </span>
+                        )}
                       </span>
                     )}
                     {!collapsed && active === item.label && (
@@ -3202,8 +3260,13 @@ function EmployeeDirectory({
                             {employee.number}
                           </span>
                         </span>
-                        {disciplinaryIndicatorsQuery.data?.indicators[employee.id]?.map((indicator) => (
-                          <DisciplinaryIndicatorBadge key={`${indicator.reference}-${indicator.icon}`} indicator={indicator} />
+                        {disciplinaryIndicatorsQuery.data?.indicators[
+                          employee.id
+                        ]?.map((indicator) => (
+                          <DisciplinaryIndicatorBadge
+                            key={`${indicator.reference}-${indicator.icon}`}
+                            indicator={indicator}
+                          />
                         ))}
                       </button>
                     </td>
@@ -3301,12 +3364,15 @@ function DisciplinaryIndicatorBadge({
 }: {
   indicator: DisciplinaryIndicator;
 }) {
-  const icon = indicator.icon === "user-x"
-    ? <Icons.UserRoundX className="size-4 text-rose-700" aria-hidden="true" />
-    : <Icons.Flag
+  const icon =
+    indicator.icon === "user-x" ? (
+      <Icons.UserRoundX className="size-4 text-rose-700" aria-hidden="true" />
+    ) : (
+      <Icons.Flag
         className={`size-4 text-rose-700 ${indicator.icon === "flag-filled" ? "fill-rose-600" : ""}`}
         aria-hidden="true"
-      />;
+      />
+    );
   return (
     <span
       title={`${indicator.label} · ${indicator.reference}`}
@@ -5278,13 +5344,16 @@ function EmployeeProfile({
     if (activeTab === "punishment" && canReadDisciplinary) {
       const employeeCases = (employeeDisciplinaryCasesQuery.data?.cases ?? [])
         .filter((caseRecord) => caseRecord.employeeId === employee.id)
-        .sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
+        .sort((left, right) =>
+          (right.createdAt || "").localeCompare(left.createdAt || ""),
+        );
       return (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="border-b border-slate-100 px-5 py-4">
             <h3 className="text-sm font-bold">Disciplinary history</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Confidential case outcomes visible only to authorized disciplinary readers.
+              Confidential case outcomes visible only to authorized disciplinary
+              readers.
             </p>
           </div>
           {employeeDisciplinaryCasesQuery.isError ? (
@@ -5311,7 +5380,9 @@ function EmployeeProfile({
                   <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-700">
                     {caseRecord.allegation}
                   </p>
-                  {["Issued", "Closed", "Rescinded"].includes(caseRecord.status) &&
+                  {["Issued", "Closed", "Rescinded"].includes(
+                    caseRecord.status,
+                  ) &&
                     caseRecord.reason && (
                       <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">
                         <strong>Issued reason:</strong> {caseRecord.reason}
@@ -5378,13 +5449,21 @@ function EmployeeProfile({
             {displayName}
           </h2>
           {disciplinaryIndicatorsQuery.data?.indicators[employee.id]?.length ? (
-            <div className="mt-2 flex flex-wrap gap-2" aria-label="Disciplinary indicators">
-              {disciplinaryIndicatorsQuery.data.indicators[employee.id].map((indicator) => (
-                <span key={`${indicator.reference}-${indicator.icon}`} className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-800">
-                  <DisciplinaryIndicatorBadge indicator={indicator} />
-                  {indicator.label}
-                </span>
-              ))}
+            <div
+              className="mt-2 flex flex-wrap gap-2"
+              aria-label="Disciplinary indicators"
+            >
+              {disciplinaryIndicatorsQuery.data.indicators[employee.id].map(
+                (indicator) => (
+                  <span
+                    key={`${indicator.reference}-${indicator.icon}`}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-semibold text-rose-800"
+                  >
+                    <DisciplinaryIndicatorBadge indicator={indicator} />
+                    {indicator.label}
+                  </span>
+                ),
+              )}
             </div>
           ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -5585,7 +5664,10 @@ function customerSalesFor(
 ) {
   return state.sales.filter((sale) => {
     if (sale.customerId === customer.id) return true;
-    if (sale.customerId && state.customers.some((item) => item.id === sale.customerId)) {
+    if (
+      sale.customerId &&
+      state.customers.some((item) => item.id === sale.customerId)
+    ) {
       return false;
     }
     const matches = state.customers.filter(
@@ -5603,7 +5685,10 @@ function customerOrdersFor(
 ) {
   return state.orders.filter((order) => {
     if (order.customerId === customer.id) return true;
-    if (order.customerId && state.customers.some((item) => item.id === order.customerId)) {
+    if (
+      order.customerId &&
+      state.customers.some((item) => item.id === order.customerId)
+    ) {
       return false;
     }
     const matches = state.customers.filter(
@@ -5849,7 +5934,8 @@ function CustomerManagementPage({
   };
   const activateCustomer = (customer: ErpState["customers"][number]) => {
     void runCustomerMutation(
-      () => updateCustomerApi(customer.id, { status: "Active", archivedAt: null }),
+      () =>
+        updateCustomerApi(customer.id, { status: "Active", archivedAt: null }),
       "Customer set to active",
     );
     setOpenActionId(null);
@@ -5949,20 +6035,33 @@ function CustomerManagementPage({
       </div>
 
       {!customersLoaded && (
-        <p role="status" className="mb-4 rounded-lg bg-white px-4 py-3 text-sm text-slate-500">
+        <p
+          role="status"
+          className="mb-4 rounded-lg bg-white px-4 py-3 text-sm text-slate-500"
+        >
           Loading customer records…
         </p>
       )}
       {loadError && (
-        <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
           <span>{loadError}</span>
-          <button type="button" onClick={onRetry} className="font-semibold underline">
+          <button
+            type="button"
+            onClick={onRetry}
+            className="font-semibold underline"
+          >
             Retry
           </button>
         </div>
       )}
       {actionError && (
-        <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+        >
           {actionError}
         </p>
       )}
@@ -6305,8 +6404,8 @@ function CustomerManagementPage({
                                   </>
                                 ) : (
                                   <>
-                                    <Icons.Archive className="size-3.5" /> Archive
-                                    customer
+                                    <Icons.Archive className="size-3.5" />{" "}
+                                    Archive customer
                                   </>
                                 )}
                               </button>
@@ -6454,7 +6553,10 @@ function CustomerFormDialog({
           className="p-5"
         >
           {saveError && (
-            <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+            <p
+              role="alert"
+              className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800"
+            >
               {saveError}
             </p>
           )}
@@ -6614,7 +6716,11 @@ function CustomerFormDialog({
               disabled={isSaving}
               className="rounded-lg bg-[#6d28d9] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSaving ? "Saving…" : customer ? "Save changes" : "Create customer"}
+              {isSaving
+                ? "Saving…"
+                : customer
+                  ? "Save changes"
+                  : "Create customer"}
             </button>
           </div>
         </form>
@@ -8149,8 +8255,7 @@ function ModulePage({
         onViewPayrollRun={onViewPayrollRun}
       />
     );
-  if (active === "Raw Material Management")
-    return <RawMaterialManagement />;
+  if (active === "Raw Material Management") return <RawMaterialManagement />;
   if (active === "Orders")
     return (
       <OrdersManagement
@@ -8163,8 +8268,7 @@ function ModulePage({
         onStateChange={updateState}
       />
     );
-  if (active === "Production Management")
-    return <ProductionManagement />;
+  if (active === "Production Management") return <ProductionManagement />;
   if (active === "Assets Management")
     return (
       <AssetManagement
@@ -8175,9 +8279,16 @@ function ModulePage({
     );
   if (active === "Data Backup")
     return (
-      <section role="status" className="rounded-xl border border-slate-200 bg-white p-8 text-center">
-        <h2 className="text-lg font-semibold text-slate-900">Data Backup is coming soon</h2>
-        <p className="mt-1 text-sm text-slate-500">This section is not available yet.</p>
+      <section
+        role="status"
+        className="rounded-xl border border-slate-200 bg-white p-8 text-center"
+      >
+        <h2 className="text-lg font-semibold text-slate-900">
+          Data Backup is coming soon
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          This section is not available yet.
+        </p>
       </section>
     );
   if (active === "Company Profile Management")
@@ -8485,7 +8596,10 @@ function ModulePage({
   if (active === "Customer Management") {
     if (!customerCanRead) {
       return (
-        <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+        <section
+          role="alert"
+          className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+        >
           You do not have permission to view customer records.
         </section>
       );
@@ -8504,9 +8618,16 @@ function ModulePage({
   }
   if (active === "Invoicing") {
     return (
-      <section role="status" className="rounded-xl border border-slate-200 bg-white p-8 text-center">
-        <h2 className="text-lg font-semibold text-slate-900">Invoicing is coming soon</h2>
-        <p className="mt-1 text-sm text-slate-500">This section is not available yet.</p>
+      <section
+        role="status"
+        className="rounded-xl border border-slate-200 bg-white p-8 text-center"
+      >
+        <h2 className="text-lg font-semibold text-slate-900">
+          Invoicing is coming soon
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          This section is not available yet.
+        </p>
       </section>
     );
   }

@@ -17,6 +17,7 @@ const saleResponse = {
   receiptNumber: 'SAL-2026-000001',
   receiptYear: 2026,
   receiptSequence: 1,
+  createdByName: 'Sales Clerk',
   customerId: 'C-100',
   customer: { name: 'Saved customer', phone: '+256700000000' },
   company: { name: 'Example Ltd', email: 'info@example.test' },
@@ -62,6 +63,7 @@ describe('sales API client', () => {
 
     const result = await createSale(input)
     expect(result.sale.receiptNumber).toBe('SAL-2026-000001')
+    expect(result.sale.createdByName).toBe('Sales Clerk')
     expect(result.sale.lines).toHaveLength(1)
     expect(result.payments[0].amount).toBe(48000)
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]

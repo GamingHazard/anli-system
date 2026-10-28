@@ -44,12 +44,15 @@
   .sale-receipt-print {
     position: fixed;
     inset: 0;
-    display: block !important;
+    display: flex !important;
     width: 100%;
+    min-height: 100vh;
+    box-sizing: border-box;
     padding: 24px;
     background: #fff;
     color: #111827;
     font-family: Arial, Helvetica, sans-serif;
+    flex-direction: column;
   }
   .sale-receipt-print h1 { margin: 18px 0 4px; font-size: 22px; }
   .receipt-brand { font-size: 14px; font-weight: 700; }
@@ -61,6 +64,10 @@
   .receipt-total span { color: #4b5563; }
   .receipt-total { font-size: 15px; }
   .receipt-thanks { margin-top: 28px; text-align: center; font-size: 11px; }
+  .receipt-signoff { display: flex; justify-content: space-between; gap: 32px; margin-top: auto; border-top: 1px solid #d1d5db; padding-top: 14px; font-size: 11px; }
+  .receipt-signoff-label { margin-bottom: 5px; color: #4b5563; }
+  .receipt-signature { min-width: 180px; }
+  .receipt-signature-line { display: block; height: 22px; border-bottom: 1px solid #6b7280; }
 }
 @media print {
   body * { visibility: hidden !important; }

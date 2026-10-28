@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, Check, ChevronLeft, ChevronRight, CircleX, ClipboardList, Download, Eye, LoaderCircle, Plus, RefreshCw, Search, X } from 'lucide-react'
-import { createId, exportCsv, formatDate, money, type ErpState, type Order, type OrderStatus, type Sale, type SalePayment } from '@/lib/erp'
+import { createId, exportCsv, formatDate, money, packUnitLabel, type ErpState, type Order, type OrderStatus, type Sale, type SalePayment } from '@/lib/erp'
 import { archiveOrder, changeOrderStatus, confirmOrder, createOrder, fulfillOrder, getOrderDetails, importLegacyOrders, listOrders, listProductionProducts, recordOrderPayment, restoreOrder, updateOrder, type OrderInput, type OrderPaymentRecord, type ProductionProduct, type UserAccount } from '@/lib/user-api'
 import { importLegacyOrdersOnce } from '@/lib/order-migration'
 
@@ -131,14 +131,14 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
             const product = products.find((item) => item.id === line.productId)
             return <div key={line.key} className="grid gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_140px_36px]">
               <label className="text-xs font-semibold">Product<select required value={line.productId} onChange={(event) => selectProduct(line.key, event.target.value)} className={field}><option value="">Choose product</option>{products.map((item) => {
-                const available = item.availablePieces ?? Math.max(0, item.balancePieces - (item.reservedPieces ?? 0))
-                return <option key={item.id} value={item.id}>{item.name} · {money(item.price || 0)}/{item.packType} · {available.toLocaleString()} pcs available</option>
+                const available = item.availablePacks ?? Math.max(0, item.balancePacks - (item.reservedPacks ?? 0))
+                return <option key={item.id} value={item.id}>{item.name} · {money(item.price || 0)}/{item.packType} · {available.toLocaleString()} {packUnitLabel(item.packType, available)} available</option>
               })}</select></label>
-              <label className="text-xs font-semibold">Packs<input type="number" required min="1" step="1" value={line.packs} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, packs: Math.max(1, Number(event.target.value)) } : draft))} className={field} /></label>
-              <label className="text-xs font-semibold">Price per pack<input type="number" required min="1" step="1" value={line.price} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, price: event.target.value } : draft))} className={field} /></label>
+              <label className="text-xs font-semibold">Quantity ({packUnitLabel(product?.packType)})<input type="number" required min="1" step="1" value={line.packs} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, packs: Math.max(1, Number(event.target.value)) } : draft))} className={field} /></label>
+              <label className="text-xs font-semibold">Price per {packUnitLabel(product?.packType, 1)}<input type="number" required min="1" step="1" value={line.price} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, price: event.target.value } : draft))} className={field} /></label>
               <button type="button" aria-label={`Remove line ${index + 1}`} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((draft) => draft.key !== line.key))} className="self-end rounded p-2 text-slate-400 disabled:opacity-30"><X className="size-4" /></button>
               {product && Number(line.price) !== product.price && <label className="text-xs font-semibold sm:col-span-4">Price override reason<input required value={line.reason} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, reason: event.target.value } : draft))} disabled={!canOverride} className={field} />{!canOverride && <span className="text-rose-700">You cannot override catalog pricing.</span>}</label>}
-              {product && <p className="text-[11px] text-slate-500 sm:col-span-4">On hand: {product.balancePieces.toLocaleString()} pcs · Reserved: {(product.reservedPieces ?? 0).toLocaleString()} pcs · Available: {(product.availablePieces ?? Math.max(0, product.balancePieces - (product.reservedPieces ?? 0))).toLocaleString()} pcs. Stock is checked again when this order is confirmed.</p>}
+              {product && <p className="text-[11px] text-slate-500 sm:col-span-4">On hand: {product.balancePacks.toLocaleString()} {packUnitLabel(product.packType, product.balancePacks)} · Reserved: {(product.reservedPacks ?? 0).toLocaleString()} {packUnitLabel(product.packType, product.reservedPacks ?? 0)} · Available: {(product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0))).toLocaleString()} {packUnitLabel(product.packType, product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0)))}. Stock is checked again when this order is confirmed.</p>}
             </div>
           })}</div>
           <div className="mt-3 text-right text-sm font-bold">Estimated total: {money(total)} <span className="text-xs font-normal text-slate-400">(server verifies)</span></div>

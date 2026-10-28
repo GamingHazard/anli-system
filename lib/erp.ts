@@ -3,7 +3,7 @@ export type Status = 'Paid' | 'Pending' | 'Overdue' | 'Approved' | 'Draft' | 'Ac
 export type SaleLine = { productId: string; productCode: string; productName: string; packType: 'Box' | 'Carton'; piecesPerPack: number; packs: number; quantityPieces: number; catalogPricePerPack: number; pricePerPack: number; overrideReason?: string; lineTotal: number }
 export type SalePartySnapshot = { name: string; contact?: string; phone?: string; email?: string; address?: string; tin?: string }
 export type SaleCompanySnapshot = { name: string; email?: string; phone?: string; address?: string; logoUrl?: string }
-export type Sale = { id: string; date: string; customer: string; customerId?: string; assignedTo?: string | null; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Paid now' | 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string; receiptNumber?: string; lines?: SaleLine[]; customerSnapshot?: SalePartySnapshot; companySnapshot?: SaleCompanySnapshot; paidAmount?: number; payments?: SalePayment[]; legacyImported?: boolean }
+export type Sale = { id: string; date: string; customer: string; customerId?: string; assignedTo?: string | null; createdByName?: string; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Paid now' | 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string; receiptNumber?: string; lines?: SaleLine[]; customerSnapshot?: SalePartySnapshot; companySnapshot?: SaleCompanySnapshot; paidAmount?: number; payments?: SalePayment[]; legacyImported?: boolean }
 export type SalePayment = { id: string; saleId: string; paymentReceiptNumber?: string; amount: number; date: string; method: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Check' | 'Card' | 'Legacy'; txnID?: string; note?: string; recordedAt: string }
 export type ManagedReceipt = {
   id: string
@@ -102,6 +102,12 @@ export type Employee = {
   department: string
   role: string
   status: 'Active' | 'Inactive'
+  deactivatedAt?: string | null
+  deactivatedBy?: string | null
+  createdBy?: string | null
+  updatedBy?: string | null
+  createdAt?: string
+  updatedAt?: string
   salary: number
   compensationType?: 'Salary earner' | 'Wage earner'
   paymentFrequency?: 'Monthly' | 'Weekly'
@@ -481,6 +487,10 @@ export const cloneSeed = (): ErpState => {
 }
 export const money = (value: number) => new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX', maximumFractionDigits: 0 }).format(value)
 export const formatDate = (date: string) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(date))
+export const packUnitLabel = (packType?: string | null, quantity?: number) => {
+  const singular = packType === 'Box' ? 'box' : packType === 'Carton' ? 'carton' : 'pack'
+  return quantity === 1 ? singular : singular === 'box' ? 'boxes' : `${singular}s`
+}
 export const sum = (items: number[]) => items.reduce((total, value) => total + value, 0)
 export const paidAmountForSale = (saleId: string, payments: SalePayment[]) =>
   sum(payments.filter((payment) => payment.saleId === saleId).map((payment) => payment.amount))

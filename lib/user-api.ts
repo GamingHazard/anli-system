@@ -366,15 +366,17 @@ export type ProductionProduct = {
   category: 'Cup' | 'Bottle'
   unit: string
   flavour: 'Mango' | 'Pineapple milk'
-  packType?: 'Box' | 'Carton'
-  piecesPerPack?: number
-  packWeightKg?: number
+  packType: 'Box' | 'Carton'
+  piecesPerPack: number
+  packWeightKg: number
   price?: number
   recipeRequired: boolean
   active: boolean
-  balancePieces: number
-  reservedPieces?: number
-  availablePieces?: number
+  balancePacks: number
+  reservedPacks?: number
+  availablePacks?: number
+  loosePieces?: number
+  inventoryEffectiveDate?: string
   recipe: ProductionRecipe | null
   activeRecipeId?: string | null
   createdAt: string
@@ -386,9 +388,22 @@ export type ProductionMaterial = {
   name: string
   category: string
   unit: string
+  packagingLevels?: MaterialPackagingLevel[]
   active: boolean
   balance: number
   locations: RawMaterialLocationBalance[]
+}
+
+export type MaterialPackagingLevel = {
+  name: string
+  quantity: number
+}
+
+export type ReceiptPackagingSnapshot = {
+  packageQuantity: number
+  packageUnit: string
+  baseUnitsPerPackage: number
+  packagePrice: number
 }
 
 export type RawMaterialLocationBalance = {
@@ -401,7 +416,7 @@ export type RawMaterialLocationBalance = {
   responsibleUserActive?: boolean
 }
 
-export type RawMaterialMovementType = 'Opening balance' | 'Receipt' | 'Stock in' | 'Stock out' | 'Production use' | 'Transfer' | 'Adjustment increase' | 'Adjustment decrease'
+export type RawMaterialMovementType = 'Opening balance' | 'Receipt' | 'Stock in' | 'Stock out' | 'Production use' | 'Production use correction' | 'Transfer' | 'Adjustment increase' | 'Adjustment decrease'
 
 export type RawMovementRecord = {
   id: string
@@ -420,6 +435,7 @@ export type RawMovementRecord = {
   supplier?: string
   sourceReference?: string
   unitCost?: number
+  receiptPackaging?: ReceiptPackagingSnapshot
   actor: string
   createdAt: string
 }
@@ -446,7 +462,7 @@ export type InventoryResponsibleUser = {
 export type ProductionMaterialUsageRecord = {
   id: string
   reference: string
-  productionRunId: string
+  productionRunId?: string
   productId: string
   productName: string
   productionDate: string
@@ -457,6 +473,7 @@ export type ProductionMaterialUsageRecord = {
   recipeVersion: number
   lines: Array<ProductionIngredient & { totalQuantity: number }>
   actor: string
+  updatedBy?: string
   createdAt: string
 }
 
@@ -469,11 +486,19 @@ export type ProductionRunRecord = {
   recipeId?: string | null
   recipeVersion?: number | null
   productionDate: string
-  openingStockPieces: number
-  salesQuantityPieces: number
-  damagedQuantityPieces: number
-  closingStockPieces: number
-  producedQuantityPieces: number
+  inventoryUnit?: 'piece_legacy' | 'pack'
+  packTypeSnapshot?: 'Box' | 'Carton'
+  piecesPerPackSnapshot?: number
+  openingStockPacks?: number
+  salesQuantityPacks?: number
+  damagedQuantityPacks?: number
+  closingStockPacks?: number
+  producedQuantityPacks?: number
+  openingStockPieces?: number
+  salesQuantityPieces?: number
+  damagedQuantityPieces?: number
+  closingStockPieces?: number
+  producedQuantityPieces?: number
   damageReason?: string
   lines: Array<ProductionIngredient & { totalQuantity: number }>
   createdAt: string
@@ -484,12 +509,27 @@ export type FinishedMovementRecord = {
   productId: string
   type: string
   direction: 'in' | 'out'
-  quantityPieces: number
+  inventoryUnit?: 'piece_legacy' | 'pack'
+  quantityPacks?: number
+  packTypeSnapshot?: 'Box' | 'Carton'
+  piecesPerPackSnapshot?: number
+  quantityPieces?: number
   date: string
   reference: string
   reason: string
   productName: string
   createdAt: string
+}
+
+export type DailyProductionStockSummary = {
+  productId: string
+  productionDate: string
+  packType: 'Box' | 'Carton'
+  piecesPerPack: number
+  openingStockPacks: number
+  salesQuantityPacks: number
+  otherMovementNetPacks: number
+  loosePieces: number
 }
 
 type ProductInput = {
@@ -521,9 +561,9 @@ export async function createProductionProduct(input: ProductInput) {
 }
 
 export async function updateProductionProduct(id: string, input: Omit<Partial<ProductInput>, 'packType' | 'piecesPerPack' | 'packWeightKg'> & {
-  packType?: '' | 'Box' | 'Carton'
-  piecesPerPack?: number | null
-  packWeightKg?: number | null
+  packType?: 'Box' | 'Carton'
+  piecesPerPack?: number
+  packWeightKg?: number
   active?: boolean
 }) {
   return request<{ product: ProductionProduct }>(`/production/products/${encodeURIComponent(id)}`, {
@@ -613,6 +653,7 @@ type ApiSale = {
   receiptSequence: number
   customerId: string | null
   assignedTo?: string | null
+  createdByName?: string
   customer: SalePartySnapshot
   company: SaleCompanySnapshot
   date: string
@@ -658,6 +699,7 @@ function normalizeSale(sale: ApiSale): { sale: Sale; payments: SalePayment[] } {
       customer,
       customerId: sale.customerId || undefined,
       assignedTo: sale.assignedTo || undefined,
+      createdByName: sale.createdByName || undefined,
       product: sale.legacyProduct || lines.map((line) => line.productName).join(', '),
       quantity: sale.legacyQuantity ?? lines.reduce((total, line) => total + line.packs, 0),
       total: sale.total,
@@ -889,10 +931,23 @@ export async function listInventoryResponsibleUsers() {
   return request<{ users: InventoryResponsibleUser[] }>('/production/materials/responsible-users')
 }
 
-export async function createProductionMaterial(input: { code: string; name: string; category: string; unit: string }) {
+export async function createProductionMaterial(input: { code: string; name: string; category: string; unit: string; packagingLevels?: MaterialPackagingLevel[] }) {
   return request<{ material: ProductionMaterial }>('/production/materials', {
     method: 'POST',
     body: JSON.stringify(input),
+  })
+}
+
+export async function updateProductionMaterial(id: string, input: { code: string; name: string; category: string; unit: string; packagingLevels?: MaterialPackagingLevel[] }) {
+  return request<{ material: ProductionMaterial }>(`/production/materials/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteProductionMaterial(id: string) {
+  return request<{ deleted: true; materialId: string; deletedUnit: string; deletedStock: number; deletedLocationCount: number; preservedMovementCount: number }>(`/production/materials/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -903,7 +958,7 @@ export async function configureRawMaterialLocation(id: string, location: string,
   })
 }
 
-export async function receiveProductionMaterial(id: string, input: { quantity: number; date: string; reference?: string; reason: string; location: string; supplier?: string; sourceReference?: string; unitCost?: number; idempotencyKey: string }) {
+export async function receiveProductionMaterial(id: string, input: { quantity?: number; date: string; reference?: string; reason: string; location: string; supplier?: string; sourceReference?: string; unitCost?: number; packageUnit?: string; packageQuantity?: number; packagePrice?: number; idempotencyKey: string }) {
   return request<{ balance: number; movement: RawMovementRecord }>(`/production/materials/${encodeURIComponent(id)}/receipts`, {
     method: 'POST',
     body: JSON.stringify(input),
@@ -942,9 +997,28 @@ export async function listProductionMaterialUsages() {
   return request<{ usages: ProductionMaterialUsageRecord[] }>('/production/materials/production-usages?limit=200')
 }
 
-export async function postProductionMaterialUsage(input: { productionRunId: string; tanksProduced: number; location: string; idempotencyKey: string }) {
+export async function postProductionMaterialUsage(input: {
+  tanksProduced: number
+  location: string
+  idempotencyKey: string
+} & (
+  | { productionRunId: string }
+  | { productId: string; productionDate: string }
+)) {
   return request<{ usage: ProductionMaterialUsageRecord; replayed?: boolean }>('/production/materials/production-usages', {
     method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateProductionMaterialUsage(id: string, input: {
+  productId: string
+  productionDate: string
+  tanksProduced: number
+  location: string
+}) {
+  return request<{ usage: ProductionMaterialUsageRecord }>(`/production/materials/production-usages/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
     body: JSON.stringify(input),
   })
 }
@@ -953,16 +1027,21 @@ export async function listProductionRuns() {
   return request<{ runs: ProductionRunRecord[] }>('/production/runs?limit=200')
 }
 
+export async function getDailyProductionStockSummary(productId: string, date: string) {
+  const params = new URLSearchParams({ productId, date })
+  return request<DailyProductionStockSummary>(`/production/runs/daily-stock-summary?${params}`)
+}
+
 export async function postProductionRun(input: {
   productId: string
   productionDate: string
-  openingStockPieces: number
-  damagedQuantityPieces: number
-  closingStockPieces: number
+  openingStockPacks: number
+  damagedQuantityPacks: number
+  closingStockPacks: number
   damageReason?: string
   idempotencyKey: string
 }) {
-  return request<{ run: ProductionRunRecord; balancePieces: number }>('/production/runs', {
+  return request<{ run: ProductionRunRecord; balancePacks: number }>('/production/runs', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -974,13 +1053,13 @@ export async function listFinishedStockMovements() {
 
 export async function receiveFinishedStock(input: {
   productId: string
-  quantityPieces: number
+  quantityPacks: number
   date: string
   reason: string
   reference?: string
   idempotencyKey: string
 }) {
-  return request<{ balancePieces: number; movement: FinishedMovementRecord }>('/production/stock/finished/receipts', {
+  return request<{ balancePacks: number; movement: FinishedMovementRecord }>('/production/stock/finished/receipts', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -989,13 +1068,13 @@ export async function receiveFinishedStock(input: {
 export async function adjustFinishedStock(input: {
   productId: string
   direction: 'in' | 'out'
-  quantityPieces: number
+  quantityPacks: number
   date: string
   reason: string
   reference?: string
   idempotencyKey: string
 }) {
-  return request<{ balancePieces: number; movement: FinishedMovementRecord }>('/production/stock/finished/adjustments', {
+  return request<{ balancePacks: number; movement: FinishedMovementRecord }>('/production/stock/finished/adjustments', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -1152,13 +1231,21 @@ export async function listOrders() {
   const orders: Order[] = []
   let pageNumber = 1
   let total = 0
+  const pageSize = 200
   do {
-    const search = new URLSearchParams({ page: String(pageNumber), limit: '200' })
-    const result = await request<{ orders: OrderApiRecord[]; total: number }>(`/orders?${search}`)
+    const search = new URLSearchParams({ page: String(pageNumber), limit: String(pageSize) })
+    const result = await request<{ orders: OrderApiRecord[]; total: number; page?: number; limit?: number }>(`/orders?${search}`)
+    if (!Array.isArray(result.orders) || !Number.isSafeInteger(result.total) || result.total < 0 ||
+      (result.page !== undefined && result.page !== pageNumber) ||
+      (result.limit !== undefined && result.limit !== pageSize)) {
+      throw new Error('The order list returned inconsistent pagination metadata.')
+    }
     orders.push(...result.orders.map(normalizeOrderApi))
     total = result.total
     pageNumber += 1
-    if (pageNumber > Math.ceil(total / 200) + 1) throw new Error('The order list returned inconsistent pagination metadata.')
+    if (orders.length < total && result.orders.length === 0) {
+      throw new Error('The order list returned inconsistent pagination metadata.')
+    }
   } while (orders.length < total)
   return orders
 }
@@ -1322,10 +1409,55 @@ export async function createEmployee(employee: Omit<Employee, 'id' | 'number' | 
   return normalizeEmployee(result.employee)
 }
 
+const EMPLOYEE_PROFILE_UPDATE_FIELDS: readonly (keyof Employee)[] = [
+  'name',
+  'firstName',
+  'secondName',
+  'otherNames',
+  'dateOfBirth',
+  'gender',
+  'maritalStatus',
+  'spouseName',
+  'spousePhone',
+  'childrenCount',
+  'educationLevel',
+  'profession',
+  'phone',
+  'email',
+  'currentAddress',
+  'placeOfOrigin',
+  'nextOfKinName',
+  'nextOfKinRelationship',
+  'nextOfKinPhone',
+  'nextOfKinAddress',
+  'mother',
+  'father',
+  'category',
+  'department',
+  'role',
+  'status',
+  'salary',
+  'compensationType',
+  'paymentFrequency',
+  'nssfNumber',
+  'tinNumber',
+  'nssfApplies',
+  'taxApplies',
+  'notes',
+  'userId',
+  'supervisorUserId',
+]
+
 export async function updateEmployee(id: string, employee: Partial<Employee>) {
+  const changes: Partial<Employee> = {}
+  for (const field of EMPLOYEE_PROFILE_UPDATE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(employee, field)) {
+      Object.assign(changes, { [field]: employee[field] })
+    }
+  }
   const result = await request<{ employee: Employee }>(`/employees/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    body: JSON.stringify(employee),
+    body: JSON.stringify(changes),
   })
   return normalizeEmployee(result.employee)
 }

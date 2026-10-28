@@ -41,6 +41,32 @@ const orderResponse = {
 }
 
 describe('orders API client', () => {
+  it('returns an empty list when the server reports no orders', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      orders: [],
+      total: 0,
+      page: 1,
+      limit: 200,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listOrders()).resolves.toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects pagination metadata that cannot supply the reported order total', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      orders: [],
+      total: 1,
+      page: 1,
+      limit: 200,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listOrders()).rejects.toThrow('The order list returned inconsistent pagination metadata.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('normalizes server snapshots including credit due dates', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       orders: [orderResponse],

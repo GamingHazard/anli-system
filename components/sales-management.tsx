@@ -1,10 +1,10 @@
 'use client'
 
-import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Eye, Plus, Printer, Search, X } from 'lucide-react'
-import { createId, exportCsv, formatDate, money, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
-import { ApiError, createSale, getCreditCustomerStatement, getCreditReminderSettings, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, Download, Eye, Plus, Printer, Search, X } from 'lucide-react'
+import { createId, exportCsv, formatDate, money, packUnitLabel, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
+import { ApiError, confirmOrder, createSale, getCreditCustomerStatement, getCreditReminderSettings, listOrders, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
 
 type Props = {
   mode: 'sales' | 'credit'
@@ -23,14 +23,28 @@ type Props = {
 
 type DraftLine = { key: string; productId: string; packs: number; price: string; reason: string }
 type SalePaymentDraft = { amount: number; date: string; method: SalePayment['method']; txnID: string; note: string }
+type SalesPeriod = 'today' | 'week' | 'month'
 
 const paymentMethods: SalePayment['method'][] = ['Cash', 'Mobile Money', 'Bank Transfer', 'Check', 'Card']
+const salesPeriodLabels: Record<SalesPeriod, string> = {
+  today: 'Today',
+  week: 'This week',
+  month: 'This month',
+}
 const today = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Africa/Kampala',
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
 }).format(new Date())
+const salesPeriodStart = (period: SalesPeriod, currentDate: string) => {
+  if (period === 'month') return `${currentDate.slice(0, 7)}-01`
+  if (period === 'today') return currentDate
+
+  const date = new Date(`${currentDate}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+  return date.toISOString().slice(0, 10)
+}
 const productQueryKey = ['sales-products']
 
 function errorMessage(error: unknown) {
@@ -172,6 +186,22 @@ function SaleReceipt({
         pdf.text(`${formatDate(payment.date)} · ${payment.method}${payment.txnID ? ` · ${payment.txnID}` : ''}: ${money(payment.amount)}`, 14, y)
         y += 5
       }
+      y += 10
+      if (y + 24 > 282) {
+        pdf.addPage()
+        y = 250
+      } else {
+        y = Math.max(y, 250)
+      }
+      pdf.setDrawColor(203, 213, 225)
+      pdf.line(14, y - 5, 196, y - 5)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(9)
+      pdf.text(`Sale made by: ${sale.createdByName || 'Name not recorded'}`, 14, y)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text('Signature:', 128, y)
+      pdf.line(148, y + 1, 196, y + 1)
+      y += 10
       pdf.save(`${(sale.receiptNumber || sale.reference).replace(/[^A-Za-z0-9_-]/g, '-')}.pdf`)
     } catch (error) {
       setDownloadError(errorMessage(error))
@@ -250,6 +280,10 @@ function SaleReceipt({
           <div className="receipt-line"><span>Balance</span><strong>{money(Math.max(0, sale.total - (sale.paidAmount ?? sum(payments.map((payment) => payment.amount)))))}</strong></div>
           {payments.map((payment) => <div key={payment.id} className="receipt-line"><span>{formatDate(payment.date)} · {payment.method}</span><strong>{money(payment.amount)}</strong></div>)}
           <p className="receipt-thanks">Thank you for your business.</p>
+          <div className="receipt-signoff">
+            <div><div className="receipt-signoff-label">Sale made by</div><strong>{sale.createdByName || 'Name not recorded'}</strong></div>
+            <div className="receipt-signature"><span>Signature</span><span className="receipt-signature-line" /></div>
+          </div>
         </div>
       </section>
     </div>
@@ -272,6 +306,9 @@ function SaleForm({
   onSubmit: (input: Parameters<typeof createSale>[0]) => Promise<Sale>
 }) {
   const [customerId, setCustomerId] = useState('')
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerMenuOpen, setCustomerMenuOpen] = useState(false)
+  const [activeCustomerOption, setActiveCustomerOption] = useState(0)
   const [guestName, setGuestName] = useState('Walk-in customer')
   const [guestPhone, setGuestPhone] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
@@ -283,14 +320,88 @@ function SaleForm({
   const [error, setError] = useState('')
   const [salePending, setSalePending] = useState(false)
   const idempotencyKey = useRef(createId('SALE'))
+  const customerPickerRef = useRef<HTMLDivElement>(null)
   const productsQuery = useQuery({ queryKey: productQueryKey, queryFn: listProductionProducts })
   const activeProducts = productsQuery.data?.products.filter((product) =>
     product.active && product.packType && product.piecesPerPack && product.price && product.price > 0,
   ) ?? []
+  const availablePacksFor = (productId: string) => {
+    const product = activeProducts.find((item) => item.id === productId)
+    return product
+      ? Math.max(0, product.availablePacks ?? product.balancePacks - (product.reservedPacks ?? 0))
+      : 0
+  }
+  const requestedPacksByProduct = lines.reduce((totals, line) => {
+    if (line.productId) totals.set(line.productId, (totals.get(line.productId) ?? 0) + line.packs)
+    return totals
+  }, new Map<string, number>())
+  const hasInsufficientStock = [...requestedPacksByProduct].some(([productId, packs]) =>
+    packs > availablePacksFor(productId),
+  )
+  const hasSellableStock = activeProducts.some((product) => availablePacksFor(product.id) > 0)
+  const stockUnavailable = productsQuery.isLoading || productsQuery.isError || !hasSellableStock
   const guest = !customerId
+  const selectedCustomer = customers.find((customer) => customer.id === customerId)
+  const customerOptions = customers.filter((customer) =>
+    customersAvailable &&
+    customer.status === 'Active' &&
+    !customer.archivedAt &&
+    customer.name.toLowerCase().includes(customerSearch.trim().toLowerCase()),
+  )
   const canOverridePrice = user.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
   const total = lines.reduce((sumLines, line) => sumLines + line.packs * Number(line.price || 0), 0)
   const todayValue = today()
+
+  useEffect(() => {
+    if (!customerMenuOpen) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !customerPickerRef.current?.contains(event.target)) {
+        setCustomerMenuOpen(false)
+        setCustomerSearch('')
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCustomerMenuOpen(false)
+        setCustomerSearch('')
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [customerMenuOpen])
+
+  const selectCustomer = (id: string) => {
+    setCustomerId(id)
+    setCustomerSearch('')
+    setCustomerMenuOpen(false)
+    setActiveCustomerOption(0)
+    if (!id) {
+      setTerms('Paid now')
+      setPaymentAmount(total)
+    }
+  }
+  const handleCustomerKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setCustomerMenuOpen(true)
+      setActiveCustomerOption((current) => Math.min(current + 1, customerOptions.length))
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setCustomerMenuOpen(true)
+      setActiveCustomerOption((current) => Math.max(current - 1, 0))
+    } else if (event.key === 'Enter' && customerMenuOpen) {
+      event.preventDefault()
+      selectCustomer(activeCustomerOption === 0 ? '' : customerOptions[activeCustomerOption - 1]?.id ?? '')
+    } else if (event.key === 'Escape' && customerMenuOpen) {
+      event.preventDefault()
+      setCustomerMenuOpen(false)
+      setCustomerSearch('')
+    }
+  }
 
   const setTerm = (value: 'Paid now' | 'Same-day' | 'Credit') => {
     setTerms(value)
@@ -313,6 +424,11 @@ function SaleForm({
     setError('')
     try {
       const savedCustomer = customers.find((customer) => customer.id === customerId)
+      if (productsQuery.isLoading || productsQuery.isError) {
+        throw new Error('Product stock is unavailable. Reload stock before completing a sale.')
+      }
+      if (!hasSellableStock) throw new Error('There is no sellable stock available for this sale.')
+      if (hasInsufficientStock) throw new Error('The requested quantity exceeds available stock. Reduce the quantity or choose another product.')
       const saleLines = lines.map((line) => {
         const product = activeProducts.find((item) => item.id === line.productId)
         if (!product) throw new Error('Choose an active priced product with valid pack details for every line.')
@@ -359,12 +475,52 @@ function SaleForm({
         </header>
         <form onSubmit={(event) => { void submit(event) }} className="space-y-5 p-5">
           <section className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-semibold text-slate-600">Customer
-              <select value={customerId || '__guest__'} onChange={(event) => { const id = event.target.value === '__guest__' ? '' : event.target.value; setCustomerId(id); if (!id) { setTerms('Paid now'); setPaymentAmount(total) } }} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
-                <option value="__guest__">Walk-in / one-time customer</option>
-                {customersAvailable && customers.filter((customer) => customer.status === 'Active' && !customer.archivedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
-              </select>
-            </label>
+            <div className="text-xs font-semibold text-slate-600">
+              <label htmlFor="sale-customer">Customer</label>
+              <div ref={customerPickerRef} className="relative mt-1.5">
+                <input
+                  id="sale-customer"
+                  type="text"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={customerMenuOpen}
+                  aria-controls={customerMenuOpen ? 'sale-customer-options' : undefined}
+                  aria-activedescendant={customerMenuOpen ? `sale-customer-option-${activeCustomerOption}` : undefined}
+                  autoComplete="off"
+                  disabled={salePending}
+                  value={customerMenuOpen ? customerSearch : customerId ? selectedCustomer?.name ?? '' : 'Walk-in / one-time customer'}
+                  onFocus={() => { setCustomerSearch(''); setCustomerMenuOpen(true); setActiveCustomerOption(0) }}
+                  onChange={(event) => { setCustomerSearch(event.target.value); setCustomerMenuOpen(true); setActiveCustomerOption(0) }}
+                  onKeyDown={handleCustomerKeyDown}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+                {customerMenuOpen && <div id="sale-customer-options" role="listbox" aria-label="Customer options" className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  <div
+                    id="sale-customer-option-0"
+                    role="option"
+                    aria-selected={activeCustomerOption === 0}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveCustomerOption(0)}
+                    onClick={() => selectCustomer('')}
+                    className={`cursor-pointer rounded-md px-3 py-2.5 text-xs font-medium ${activeCustomerOption === 0 ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                  >Walk-in / one-time customer</div>
+                  {customerOptions.map((customer, index) => {
+                    const optionIndex = index + 1
+                    return <div
+                      key={customer.id}
+                      id={`sale-customer-option-${optionIndex}`}
+                      role="option"
+                      aria-selected={activeCustomerOption === optionIndex}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setActiveCustomerOption(optionIndex)}
+                      onClick={() => selectCustomer(customer.id)}
+                      className={`cursor-pointer rounded-md px-3 py-2.5 text-xs font-medium ${activeCustomerOption === optionIndex ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >{customer.name}</div>
+                  })}
+                  {customerOptions.length === 0 && customerSearch.trim() && <p role="status" className="px-3 py-2.5 text-xs font-normal text-slate-400">No matching saved customers. Choose walk-in or try another search.</p>}
+                </div>}
+              </div>
+            </div>
             {guest && <label className="text-xs font-semibold text-slate-600">Receipt name <span className="font-normal text-slate-400">Optional</span><input value={guestName} onChange={(event) => setGuestName(event.target.value)} maxLength={180} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" /></label>}
             {guest && <label className="text-xs font-semibold text-slate-600">Phone <span className="font-normal text-slate-400">Optional</span><input type="tel" value={guestPhone} onChange={(event) => setGuestPhone(event.target.value)} maxLength={40} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" /></label>}
             {guest && <label className="text-xs font-semibold text-slate-600">Email <span className="font-normal text-slate-400">Optional</span><input type="email" value={guestEmail} onChange={(event) => setGuestEmail(event.target.value)} maxLength={254} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" /></label>}
@@ -376,22 +532,32 @@ function SaleForm({
             {productsQuery.isLoading && <p role="status" className="text-xs text-slate-500">Loading product prices…</p>}
             {productsQuery.isError && <p role="alert" className="text-xs text-rose-700">{errorMessage(productsQuery.error)} <button type="button" onClick={() => void productsQuery.refetch()} className="font-semibold underline">Retry</button></p>}
             {!productsQuery.isLoading && activeProducts.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">No active products have a catalog price and valid outer-pack size. Configure product price and packaging in Production Management before recording sales.</p>}
+            {!productsQuery.isLoading && !productsQuery.isError && activeProducts.length > 0 && !hasSellableStock && <p role="alert" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-900">There is no sellable stock available. Restock a product before recording a sale.</p>}
             <div className="space-y-3">{lines.map((line, index) => {
               const product = activeProducts.find((item) => item.id === line.productId)
+              const availablePacks = product ? availablePacksFor(product.id) : 0
+              const otherRequestedPacks = lines.reduce((totalPacks, item) =>
+                item.productId === line.productId && item.key !== line.key ? totalPacks + item.packs : totalPacks,
+              0)
+              const lineStockExceeded = Boolean(product && (requestedPacksByProduct.get(product.id) ?? 0) > availablePacks)
               const catalogPrice = product?.price ?? 0
               const overridden = Boolean(product && Number(line.price) !== catalogPrice)
               return <div key={line.key} className="grid items-end gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_145px_36px]">
                 <label className="text-xs font-semibold text-slate-600">Product
                   <select required value={line.productId} disabled={salePending} onChange={(event) => changeProduct(line.key, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
                     <option value="">Choose product</option>
-                    {activeProducts.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.packType} · {money(item.price ?? 0)}/pack</option>)}
+                    {activeProducts.map((item) => {
+                      const available = availablePacksFor(item.id)
+                      return <option key={item.id} value={item.id} disabled={available === 0}>{item.name} · {item.packType} · {money(item.price ?? 0)}/pack · {available > 0 ? `${available} available` : 'Out of stock'}</option>
+                    })}
                   </select>
-                  {product && <span className="mt-1 block text-[10px] font-normal text-slate-400">On hand: {Math.floor(product.balancePieces / (product.piecesPerPack ?? 1))} packs ({product.balancePieces} pieces)</span>}
+                  {product && <span className="mt-1 block text-[10px] font-normal text-slate-400">Available: {availablePacks.toLocaleString()} {packUnitLabel(product.packType, availablePacks)} · {product.loosePieces ?? 0} loose pieces not sellable</span>}
                 </label>
-                <label className="text-xs font-semibold text-slate-600">Packs<input required type="number" min="1" step="1" value={line.packs} disabled={salePending} onChange={(event) => changeTermTotal(lines.map((item) => item.key === line.key ? { ...item, packs: Math.max(1, Number(event.target.value)) } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm" /></label>
-                <label className="text-xs font-semibold text-slate-600">Price / pack (UGX)<input required type="number" min="1" step="1" value={line.price} disabled={salePending || !canOverridePrice} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, price: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
+                <label className="text-xs font-semibold text-slate-600">Quantity ({packUnitLabel(product?.packType)})<input required type="number" min="1" max={Math.max(1, availablePacks - otherRequestedPacks)} step="1" value={line.packs} disabled={salePending || !product || availablePacks === 0} onChange={(event) => changeTermTotal(lines.map((item) => item.key === line.key ? { ...item, packs: Math.max(1, Number(event.target.value)) } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
+                <label className="text-xs font-semibold text-slate-600">Price / {packUnitLabel(product?.packType, 1)} (UGX)<input required type="number" min="1" step="1" value={line.price} disabled={salePending || !canOverridePrice} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, price: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
                 <button type="button" aria-label={`Remove product ${index + 1}`} disabled={salePending || lines.length === 1} onClick={() => changeTermTotal(lines.filter((item) => item.key !== line.key))} className="grid size-9 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X className="size-4" /></button>
                 {overridden && <label className="text-xs font-semibold text-amber-800 sm:col-span-4">Reason for price override<input required value={line.reason} disabled={salePending} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, reason: event.target.value } : item))} maxLength={500} className="mt-1.5 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm" /></label>}
+                {lineStockExceeded && <p role="alert" className="text-xs font-medium text-rose-700 sm:col-span-4">Requested quantity exceeds available stock ({availablePacks} {packUnitLabel(product?.packType, availablePacks)} available).</p>}
                 <div className="text-right text-xs text-slate-500 sm:col-span-4">Line total: <strong className="text-slate-800">{money(line.packs * Number(line.price || 0))}</strong></div>
               </div>
             })}</div>
@@ -410,7 +576,7 @@ function SaleForm({
             {(guest || terms === 'Paid now' || paymentAmount > 0) && <label className="text-xs font-semibold text-slate-600">Payment method<select value={method} disabled={salePending} onChange={(event) => setMethod(event.target.value as SalePayment['method'])} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">{paymentMethods.map((item) => <option key={item}>{item}</option>)}</select></label>}
           </section>
           {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>}
-          <footer className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={salePending} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold">Cancel</button><button type="submit" disabled={salePending || productsQuery.isLoading || !activeProducts.length} className="rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{salePending ? 'Saving sale…' : 'Complete sale'}</button></footer>
+          <footer className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={salePending} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold">Cancel</button><button type="submit" disabled={salePending || stockUnavailable || !activeProducts.length || hasInsufficientStock} className="rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{salePending ? 'Saving sale…' : 'Complete sale'}</button></footer>
         </form>
       </section>
     </div>
@@ -432,6 +598,8 @@ export default function SalesManagementPage({
   onRetryCustomers,
 }: Props) {
   const [search, setSearch] = useState('')
+  const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>('today')
+  const [salesPeriodMenuOpen, setSalesPeriodMenuOpen] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null)
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
@@ -449,10 +617,54 @@ export default function SalesManagementPage({
   const [settingsDraft, setSettingsDraft] = useState({ daysBeforeDue: '7, 1, 0', daysAfterDue: '1, 3, 7', repeatOverdueEveryDays: '7', escalateAfterDays: '7' })
   const [settingsError, setSettingsError] = useState('')
   const [settingsSaving, setSettingsSaving] = useState(false)
+  const [pendingOrderMessage, setPendingOrderMessage] = useState('')
   const queryClient = useQueryClient()
+  const salesPeriodMenuRef = useRef<HTMLDivElement>(null)
   const [paymentDraft, setPaymentDraft] = useState<SalePaymentDraft>({ amount: 0, date: today(), method: 'Cash', txnID: '', note: '' })
   const paymentKey = useRef({ saleId: '', value: createId('PAY') })
+  useEffect(() => {
+    if (!salesPeriodMenuOpen) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !salesPeriodMenuRef.current?.contains(event.target)) setSalesPeriodMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSalesPeriodMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [salesPeriodMenuOpen])
   const canCreate = currentUser.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
+  const pendingOrdersQuery = useQuery({
+    queryKey: ['sales-pending-orders'],
+    queryFn: listOrders,
+    enabled: mode === 'sales',
+  })
+  const pendingOrders = (pendingOrdersQuery.data ?? [])
+    .filter((order) => order.status === 'Pending' && !order.archivedAt && !order.legacyImported)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  const confirmOrderMutation = useMutation({
+    mutationFn: (orderId: string) => confirmOrder(orderId),
+    onSuccess: async (order) => {
+      setPendingOrderMessage(`${order.reference} confirmed and stock reserved.`)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['sales-pending-orders'] }),
+        queryClient.invalidateQueries({ queryKey: productQueryKey }),
+      ])
+    },
+    onError: (error: Error) => setPendingOrderMessage(errorMessage(error)),
+  })
+  const stockProductsQuery = useQuery({
+    queryKey: productQueryKey,
+    queryFn: listProductionProducts,
+    enabled: mode === 'sales',
+  })
+  const stockProducts = stockProductsQuery.data?.products ?? []
+  const productsWithAvailableStock = stockProducts.filter((product) => product.active
+    && (product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0))) > 0).length
   const visibleSales = useMemo(() => state.sales.filter((sale) => {
     const searchable = `${sale.reference} ${sale.customer} ${sale.product} ${sale.lines?.map((line) => line.productName).join(' ') ?? ''}`.toLowerCase()
     if (!searchable.includes(search.toLowerCase())) return false
@@ -478,6 +690,13 @@ export default function SalesManagementPage({
     enabled: Boolean(statementCustomerId),
   })
   const todayDate = today()
+  const periodStartDate = salesPeriodStart(salesPeriod, todayDate)
+  const periodSalesTotal = sum(state.sales
+    .filter((sale) => {
+      const saleDate = sale.date.slice(0, 10)
+      return saleDate >= periodStartDate && saleDate <= todayDate
+    })
+    .map((sale) => sale.total))
   const dueSoonWindow = Math.max(...(reminderSettings.data?.settings.daysBeforeDue ?? [7]))
   const dueSoonSales = outstandingSales.filter((sale) =>
     Boolean(sale.dueDate && sale.dueDate >= todayDate && sale.dueDate <= new Date(Date.parse(`${todayDate}T00:00:00.000Z`) + dueSoonWindow * 86400000).toISOString().slice(0, 10)),
@@ -597,10 +816,62 @@ export default function SalesManagementPage({
         <div className="flex gap-2"><button type="button" onClick={() => exportCsv(mode === 'credit' ? 'credit-sales.csv' : 'sales.csv', visibleSales.map((sale) => ({ reference: sale.receiptNumber || sale.reference, customer: sale.customer, date: sale.date, products: sale.product, total: sale.total, paid: paidAmountForSale(sale.id, state.payments), balance: Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)), paymentTerms: sale.paymentTerms }))) } className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold"><Download className="size-4" /> Export CSV</button>{mode === 'sales' && canCreate && <button type="button" onClick={() => setShowForm(true)} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"><Plus className="size-4" /> Add sale</button>}</div>
       </header>
       {salesWarning && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">{salesWarning}</p>}
-      {mode === 'sales' ? <section className="mb-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Sales today</div><div className="mt-1 font-bold">{money(sum(state.sales.filter((sale) => sale.date === today()).map((sale) => sale.total)))}</div></div>
+      {mode === 'sales' ? <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-xs text-slate-500">Sales {salesPeriodLabels[salesPeriod].toLowerCase()}</div>
+            <div ref={salesPeriodMenuRef} className="relative -mt-1 -mr-1">
+              <button
+                type="button"
+                aria-label={`Sales period: ${salesPeriodLabels[salesPeriod]}`}
+                aria-haspopup="menu"
+                aria-expanded={salesPeriodMenuOpen}
+                onClick={() => setSalesPeriodMenuOpen((open) => !open)}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                {salesPeriodLabels[salesPeriod]} <ChevronDown className={`size-3 transition-transform ${salesPeriodMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {salesPeriodMenuOpen && <div role="menu" aria-label="Sales period" className="absolute right-0 z-20 mt-1 min-w-32 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                {(Object.keys(salesPeriodLabels) as SalesPeriod[]).map((period) => (
+                  <button
+                    key={period}
+                    type="button"
+                    role="menuitem"
+                    aria-current={salesPeriod === period ? 'true' : undefined}
+                    onClick={() => { setSalesPeriod(period); setSalesPeriodMenuOpen(false) }}
+                    className={`w-full rounded-md px-3 py-2 text-left text-xs font-medium ${salesPeriod === period ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                  >{salesPeriodLabels[period]}</button>
+                ))}
+              </div>}
+            </div>
+          </div>
+          <div className="mt-1 font-bold">{money(periodSalesTotal)}</div>
+        </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Outstanding balance</div><div className="mt-1 font-bold">{money(sum(state.sales.map((sale) => Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)))))}</div></div>
-        <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Sales records</div><div className="mt-1 font-bold">{state.sales.length}</div></div>
+        <article className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-slate-600">Total pending orders</h3><span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-amber-700">Awaiting confirmation</span></div>
+          {pendingOrdersQuery.isLoading ? <p role="status" className="mt-2 text-[10px] text-slate-400">Loading pending orders…</p>
+            : pendingOrdersQuery.isError ? <div className="mt-2"><p role="alert" className="text-[10px] text-rose-700">Pending orders could not be loaded.</p><button type="button" onClick={() => { void pendingOrdersQuery.refetch() }} className="mt-1 text-[10px] font-semibold text-primary hover:underline">Retry</button></div>
+              : <><p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{pendingOrders.length} <span className="text-xs font-medium text-slate-500">{pendingOrders.length === 1 ? 'order' : 'orders'}</span></p>
+                <ul aria-label="Latest pending orders" className="mt-2 max-h-28 space-y-2 overflow-y-auto border-t border-slate-100 pt-2">
+                  {pendingOrders.length ? pendingOrders.slice(0, 3).map((order) => <li key={order.id} className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-700">{order.customer}</span><span className="block truncate text-slate-400">{order.reference} · requested {formatDate(order.requestedDate)}</span></span>
+                    {canCreate && <button type="button" disabled={confirmOrderMutation.isPending} onClick={() => { setPendingOrderMessage(''); confirmOrderMutation.mutate(order.id) }} className="shrink-0 rounded-md bg-emerald-50 px-2 py-1.5 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-50">{confirmOrderMutation.isPending && confirmOrderMutation.variables === order.id ? 'Confirming…' : 'Confirm'}</button>}
+                  </li>) : <li className="py-1 text-[10px] text-slate-400">No orders are awaiting confirmation.</li>}
+                </ul>
+                {!canCreate && pendingOrders.length > 0 && <p className="mt-2 text-[10px] text-slate-400">A sales manager can confirm these orders.</p>}
+                {pendingOrderMessage && <p role={confirmOrderMutation.isError ? 'alert' : 'status'} className={`mt-2 border-t border-slate-100 pt-2 text-[10px] ${confirmOrderMutation.isError ? 'text-rose-700' : 'text-emerald-700'}`}>{pendingOrderMessage}</p>}
+              </>}
+        </article>
+        <article className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-slate-600">Product stock availability</h3><span className="rounded-full bg-sky-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-sky-700">Live</span></div>
+          {stockProductsQuery.isLoading ? <p role="status" className="mt-2 text-[10px] text-slate-400">Loading product stock…</p>
+            : stockProductsQuery.isError ? <div className="mt-2"><p role="alert" className="text-[10px] text-rose-700">Product stock could not be loaded.</p><button type="button" onClick={() => { void stockProductsQuery.refetch() }} className="mt-1 text-[10px] font-semibold text-primary hover:underline">Retry</button></div>
+              : <><p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{productsWithAvailableStock.toLocaleString()} <span className="text-xs font-medium text-slate-500">products with stock</span></p><ul aria-label="Available stock by product" className="mt-2 max-h-24 space-y-1 overflow-y-auto border-t border-slate-100 pt-2">{stockProducts.length ? stockProducts.map((product) => {
+                const available = product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0))
+                return <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]"><span className="min-w-0 truncate font-medium text-slate-600">{product.name}{!product.active ? ' · inactive' : ''}</span><span className={`shrink-0 font-semibold tabular-nums ${available > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>{available.toLocaleString()} {packUnitLabel(product.packType, available)}</span></li>
+              }) : <li className="text-[10px] text-slate-400">No products found</li>}</ul></>}
+        </article>
       </section> : <section className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Outstanding credit</div><div className="mt-1 font-bold">{money(sum(outstandingSales.map((sale) => Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)))))}</div></div>
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Overdue credit sales</div><div className="mt-1 font-bold">{overdueSales.length}</div></div>

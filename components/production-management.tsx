@@ -3,10 +3,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Icons from 'lucide-react'
-import { createId, exportCsv, formatDate } from '@/lib/erp'
+import { createId, exportCsv, formatDate, packUnitLabel } from '@/lib/erp'
 import {
   adjustFinishedStock,
   createProductionProduct,
+  getDailyProductionStockSummary,
   listFinishedStockMovements,
   listProductionMaterials,
   listProductionProducts,
@@ -33,18 +34,17 @@ function messageFor(error: unknown) {
 }
 
 function stockLabel(product: ProductionProduct) {
-  const availablePieces = product.availablePieces ?? Math.max(0, product.balancePieces - (product.reservedPieces ?? 0))
-  const reservedPieces = product.reservedPieces ?? 0
-  if (!product.piecesPerPack) return `${product.balancePieces.toLocaleString()} on hand · ${reservedPieces.toLocaleString()} reserved · ${availablePieces.toLocaleString()} available pieces`
-  const packs = Math.floor(product.balancePieces / product.piecesPerPack)
-  const loose = product.balancePieces % product.piecesPerPack
-  return `${product.balancePieces.toLocaleString()} pcs on hand · ${packs} ${product.packType?.toLowerCase() ?? 'packs'}${loose ? ` + ${loose} loose` : ''} · ${reservedPieces.toLocaleString()} reserved · ${availablePieces.toLocaleString()} available`
+  const reservedPacks = product.reservedPacks ?? 0
+  const availablePacks = product.availablePacks ?? Math.max(0, product.balancePacks - reservedPacks)
+  const pluralPackType = packUnitLabel(product.packType)
+  const loosePieces = product.loosePieces ?? 0
+  return `${product.balancePacks.toLocaleString()} ${pluralPackType} on hand · ${reservedPacks.toLocaleString()} reserved · ${availablePacks.toLocaleString()} available${loosePieces ? ` · ${loosePieces.toLocaleString()} loose pieces not sellable as a full pack` : ''}`
 }
 
-function Metric({ label, value, detail, icon, tone }: { label: string; value: string; detail: string; icon: string; tone: 'purple' | 'blue' | 'amber' | 'rose' }) {
+function Metric({ label, value, detail, icon, tone, stockByProduct, productsProduced }: { label: string; value: string; detail: string; icon: string; tone: 'purple' | 'blue' | 'amber' | 'rose'; stockByProduct?: ProductionProduct[]; productsProduced?: Array<{ id: string; name: string; quantity: number; packType?: string }> }) {
   const Icon = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[icon] ?? Icons.Factory
   const color = tone === 'purple' ? 'bg-secondary text-primary' : tone === 'blue' ? 'bg-sky-50 text-sky-700' : tone === 'amber' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
-  return <article className="rounded-lg border border-slate-200 bg-white p-4"><div className="flex items-center justify-between"><span className={`grid size-9 place-items-center rounded-md ${color}`}><Icon className="size-4" /></span><span className="text-[9px] font-semibold uppercase text-slate-400">Live</span></div><div className="mt-3 text-xl font-bold tracking-tight">{value}</div><h3 className="mt-0.5 text-xs font-semibold text-slate-700">{label}</h3><p className="mt-1 text-[10px] text-slate-500">{detail}</p></article>
+  return <article className="rounded-lg border border-slate-200 bg-white p-4"><div className="flex items-center justify-between"><span className={`grid size-9 place-items-center rounded-md ${color}`}><Icon className="size-4" /></span><span className="text-[9px] font-semibold uppercase text-slate-400">Live</span></div><div className="mt-3 text-xl font-bold tracking-tight">{value}</div><h3 className="mt-0.5 text-xs font-semibold text-slate-700">{label}</h3><p className="mt-1 text-[10px] text-slate-500">{detail}</p>{stockByProduct && <section aria-label="Finished stock by product" className="mt-3 border-t border-slate-100 pt-2.5"><h4 className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Stock by product</h4><ul className="max-h-28 space-y-1 overflow-y-auto pr-1">{stockByProduct.length ? stockByProduct.map((product) => <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]"><span className="min-w-0 truncate font-medium text-slate-600">{product.name}</span><span className="shrink-0 font-semibold tabular-nums text-slate-800">{product.balancePacks.toLocaleString()} {packUnitLabel(product.packType)}</span></li>) : <li className="text-[10px] text-slate-400">No products available</li>}</ul></section>}{productsProduced && <section aria-label="Products produced today" className="mt-3 border-t border-slate-100 pt-2.5"><h4 className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Products produced</h4><ul className="max-h-28 space-y-1 overflow-y-auto pr-1">{productsProduced.length ? productsProduced.map((product) => <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]"><span className="min-w-0 truncate font-medium text-slate-600">{product.name}</span><span className="shrink-0 font-semibold tabular-nums text-slate-800">{product.quantity.toLocaleString()} {packUnitLabel(product.packType)}</span></li>) : <li className="text-[10px] text-slate-400">No production today</li>}</ul></section>}</article>
 }
 
 function Field({ label, children, wide = false }: { label: string; children: React.ReactNode; wide?: boolean }) {
@@ -85,12 +85,18 @@ export default function ProductionManagement() {
   const runs = workspace.data?.runs ?? []
   const movements = workspace.data?.movements ?? []
   const todayRuns = runs.filter((run) => run.productionDate === today())
-  const todayProduced = todayRuns.reduce((total, run) => total + run.producedQuantityPieces, 0)
+  const todayProduced = todayRuns.reduce((total, run) => total + (run.producedQuantityPacks ?? 0), 0)
+  const productsProducedToday = [...todayRuns.reduce((totals, run) => {
+    const current = totals.get(run.productId) ?? { id: run.productId, name: run.productName, quantity: 0, packType: run.packTypeSnapshot }
+    current.quantity += run.producedQuantityPacks ?? 0
+    totals.set(run.productId, current)
+    return totals
+  }, new Map<string, { id: string; name: string; quantity: number; packType?: string }>()).values()]
   const todaySales = movements
-    .filter((movement) => movement.date === today() && movement.type === 'Sales dispatch')
-    .reduce((total, movement) => total + movement.quantityPieces, 0)
-  const todayDamage = todayRuns.reduce((total, run) => total + run.damagedQuantityPieces, 0)
-  const totalStock = products.reduce((total, product) => total + product.balancePieces, 0)
+    .filter((movement) => movement.date === today() && movement.type === 'Sales dispatch' && movement.inventoryUnit === 'pack')
+    .reduce((total, movement) => total + (movement.quantityPacks ?? 0), 0)
+  const todayDamage = todayRuns.reduce((total, run) => total + (run.damagedQuantityPacks ?? 0), 0)
+  const activeProductCount = products.filter((product) => product.active).length
 
   const visibleProducts = useMemo(() => products.filter((product) =>
     `${product.code} ${product.name} ${product.category} ${product.flavour} ${product.unit}`.toLowerCase().includes(search.trim().toLowerCase()),
@@ -112,7 +118,7 @@ export default function ProductionManagement() {
   const runMutation = useMutation({
     mutationFn: postProductionRun,
     onSuccess: async ({ run }) => {
-      setMessage(`${run.reference} posted: ${run.producedQuantityPieces.toLocaleString()} pieces produced.`)
+      setMessage(`${run.reference} posted: ${(run.producedQuantityPacks ?? 0).toLocaleString()} ${packUnitLabel(run.packTypeSnapshot)} produced.`)
       await refresh()
     },
     onError: (error) => setMessage(messageFor(error)),
@@ -143,9 +149,9 @@ export default function ProductionManagement() {
         unit: input.unit,
         flavour: input.flavour,
         price: input.price,
-        packType: input.packType ?? '',
-        piecesPerPack: input.packType ? input.piecesPerPack : null,
-        packWeightKg: input.packType ? input.packWeightKg : null,
+        packType: input.packType,
+        piecesPerPack: input.piecesPerPack,
+        packWeightKg: input.packWeightKg,
         recipeRequired: input.recipeRequired,
         ingredients,
       })
@@ -166,9 +172,9 @@ export default function ProductionManagement() {
     runMutation.mutate({
       productId: String(form.get('productId')),
       productionDate: String(form.get('productionDate')),
-      openingStockPieces: Number(form.get('openingStockPieces')),
-      damagedQuantityPieces: Number(form.get('damagedQuantityPieces')),
-      closingStockPieces: Number(form.get('closingStockPieces')),
+      openingStockPacks: Number(form.get('openingStockPacks')),
+      damagedQuantityPacks: Number(form.get('damagedQuantityPacks')),
+      closingStockPacks: Number(form.get('closingStockPacks')),
       damageReason: String(form.get('damageReason') || ''),
       idempotencyKey: createId('RUN'),
     })
@@ -181,7 +187,7 @@ export default function ProductionManagement() {
     const movementKind = String(form.get('movementKind'))
     const input = {
       productId,
-      quantityPieces: Number(form.get('quantityPieces')),
+      quantityPacks: Number(form.get('quantityPacks')),
       date: String(form.get('date')),
       reason: String(form.get('reason')).trim(),
       reference: String(form.get('reference') || '').trim() || undefined,
@@ -201,15 +207,29 @@ export default function ProductionManagement() {
     if (view === 'Products') exportCsv('finished-products.csv', visibleProducts.map((product) => ({
       code: product.code, product: product.name, category: product.category, flavour: product.flavour, unit: product.unit,
       packType: product.packType ?? '', piecesPerPack: product.piecesPerPack ?? '', packWeightKg: product.packWeightKg ?? '',
-      balancePieces: product.balancePieces, status: product.active ? 'Active' : 'Inactive',
-      reservedPieces: product.reservedPieces ?? 0,
-      availablePieces: product.availablePieces ?? Math.max(0, product.balancePieces - (product.reservedPieces ?? 0)),
+      balancePacks: product.balancePacks, stockUnit: product.packType ?? '', status: product.active ? 'Active' : 'Inactive',
+      loosePieces: product.loosePieces ?? 0,
+      reservedPacks: product.reservedPacks ?? 0,
+      availablePacks: product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0)),
     })))
-    else if (view === 'Finished stock') exportCsv('finished-stock-movements.csv', visibleMovements)
+    else if (view === 'Finished stock') exportCsv('finished-stock-movements.csv', visibleMovements.map((movement) => {
+      const packMovement = movement.inventoryUnit === 'pack'
+      return {
+        date: movement.date,
+        product: movement.productName,
+        movement: movement.type,
+        quantity: packMovement ? movement.quantityPacks ?? 0 : movement.quantityPieces ?? 0,
+        unit: packMovement ? packUnitLabel(movement.packTypeSnapshot) : 'pcs (legacy)',
+        reason: movement.reason,
+        reference: movement.reference,
+      }
+    }))
     else exportCsv('production-history.csv', visibleRuns.map((run) => ({
-      date: run.productionDate, reference: run.reference, product: run.productName, openingPieces: run.openingStockPieces,
-      legacySalesPieces: run.salesQuantityPieces, damagedPieces: run.damagedQuantityPieces, closingPieces: run.closingStockPieces,
-      producedPieces: run.producedQuantityPieces, recipeVersion: run.recipeVersion ?? '', actor: run.createdAt,
+      date: run.productionDate, reference: run.reference, product: run.productName, inventoryUnit: run.inventoryUnit ?? 'piece_legacy',
+      openingPacks: run.openingStockPacks ?? '', salesPacks: run.salesQuantityPacks ?? '', damagedPacks: run.damagedQuantityPacks ?? '',
+      closingPacks: run.closingStockPacks ?? '', producedPacks: run.producedQuantityPacks ?? '',
+      legacyOpeningPieces: run.openingStockPieces ?? '', legacyClosingPieces: run.closingStockPieces ?? '',
+      recipeVersion: run.recipeVersion ?? '', actor: run.createdAt,
     })))
   }
 
@@ -220,10 +240,10 @@ export default function ProductionManagement() {
     <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Inventory Department</div><h2 className="text-2xl font-bold tracking-tight">Production management</h2><p className="mt-1 text-sm text-slate-500">Products, recipes, production, and finished-goods stock.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={exportCurrent} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700"><Icons.Download className="size-4" /> Export</button><button type="button" onClick={() => { setEditingProduct(null); setShowProductForm(true); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-700"><Icons.PackagePlus className="size-4" /> Add product</button></div></header>
 
     <section aria-label="Production summary" className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Produced today" value={todayProduced.toLocaleString()} detail={`${todayRuns.length} production records`} icon="Factory" tone="purple" />
-      <Metric label="Finished stock on hand" value={totalStock.toLocaleString()} detail="Sellable pieces across active products" icon="PackageCheck" tone="blue" />
-      <Metric label="Sales dispatched today" value={todaySales.toLocaleString()} detail="Posted by confirmed sales" icon="Truck" tone="amber" />
-      <Metric label="Damage today" value={todayDamage.toLocaleString()} detail="Recorded write-offs" icon="PackageX" tone="rose" />
+      <Metric label="Produced today" value={todayProduced.toLocaleString()} detail={`${todayRuns.length} production records · configured packs`} icon="Factory" tone="purple" productsProduced={productsProducedToday} />
+      <Metric label="Active finished products" value={activeProductCount.toLocaleString()} detail="Stock is shown per product in its configured box/carton" icon="PackageCheck" tone="blue" stockByProduct={products.filter((product) => product.active)} />
+      <Metric label="Sales dispatched today" value={todaySales.toLocaleString()} detail="Boxes/cartons posted by confirmed sales" icon="Truck" tone="amber" />
+      <Metric label="Damage today" value={todayDamage.toLocaleString()} detail="Boxes/cartons recorded as write-offs" icon="PackageX" tone="rose" />
     </section>
 
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -242,7 +262,7 @@ export default function ProductionManagement() {
       {view === 'Production history' && <ProductionHistory runs={visibleRuns} onSelect={setSelectedRun} />}
 
       {message && <p role="status" className="border-t border-slate-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">{message}</p>}
-      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Sales dispatches are posted by confirmed sales. Daily production records calculate production from opening stock, damage, and physical closing stock; legacy sales entries remain visible in history.</footer>
+      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Finished stock is counted in each product’s configured box or carton. Daily sales are calculated from sales records; production reconciles opening, sales, damage, other movements, and physical closing counts. Legacy piece history remains labeled in pieces.</footer>
     </section>
 
     {showProductForm && <ProductDialog key={editingProduct?.id ?? 'new'} product={editingProduct} materials={materials} message={message} onClose={() => { setShowProductForm(false); setEditingProduct(null) }} onSave={saveProduct} disabled={productMutation.isPending} />}
@@ -257,23 +277,34 @@ function DailyProductionForm({ products, runs, onSubmit, disabled }: { products:
   const [closing, setClosing] = useState('0')
   const [damageReason, setDamageReason] = useState('')
   const product = products.find((item) => item.id === productId)
-  const opening = product?.balancePieces ?? 0
-  const produced = Number(closing) + Number(damage) - opening
+  const summaryQuery = useQuery({
+    queryKey: [...queryKey, 'daily-stock-summary', productId, date],
+    queryFn: () => getDailyProductionStockSummary(productId, date),
+    enabled: Boolean(product?.packType && date),
+  })
+  const summary = summaryQuery.data
+  const opening = summary?.openingStockPacks ?? 0
+  const sales = summary?.salesQuantityPacks ?? 0
+  const otherMovementNet = summary?.otherMovementNetPacks ?? 0
+  const produced = Number(closing) + sales + Number(damage) - opening - otherMovementNet
   const duplicate = runs.some((run) => run.productId === productId && run.productionDate === date)
   const invalidCount = [opening, Number(damage), Number(closing), produced].some((value) => !Number.isFinite(value) || value < 0)
-  const blocked = !product || invalidCount || duplicate || (Number(damage) > 0 && !damageReason.trim()) || (product.recipeRequired && !product.recipe)
+  const blocked = !product || !summary || summaryQuery.isLoading || summaryQuery.isError || invalidCount || duplicate || (Number(damage) > 0 && !damageReason.trim()) || (product.recipeRequired && !product.recipe)
 
   return <form onSubmit={onSubmit} className="p-4">
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      <Field label="Production date"><input required name="productionDate" type="date" value={date} onChange={(event) => setDate(event.target.value)} className={inputClass} /></Field>
+      <Field label="Production date"><input required name="productionDate" type="date" max={today()} value={date} onChange={(event) => setDate(event.target.value)} className={inputClass} /></Field>
       <Field label="Product"><select required name="productId" value={productId} onChange={(event) => setProductId(event.target.value)} className={inputClass}><option value="">Select product</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.code})</option>)}</select></Field>
-      <Field label="Current opening stock (pieces)"><input name="openingStockPieces" type="number" value={opening} readOnly className={`${inputClass} bg-slate-50`} /><span className="mt-1 block text-[10px] font-normal text-slate-400">{product ? stockLabel(product) : 'Select a product'}</span></Field>
+      <Field label={`Opening stock (${packUnitLabel(summary?.packType)})`}><input name="openingStockPacks" type="number" value={summary ? opening : ''} readOnly className={`${inputClass} bg-slate-50`} /><span className="mt-1 block text-[10px] font-normal text-slate-400">{summaryQuery.isLoading ? 'Loading opening stock…' : summary && product ? `Current balance: ${stockLabel(product)}` : product ? 'Opening stock summary is unavailable' : 'Select a product'}</span></Field>
       {product?.packType && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs"><div className="font-semibold">{product.packType}: {product.piecesPerPack} pieces</div><div className="mt-1 text-slate-500">{product.packWeightKg} kg net product weight per pack</div></div>}
-      <Field label="Damaged / written off (pieces)"><input required name="damagedQuantityPieces" type="number" min="0" step="1" value={damage} onChange={(event) => setDamage(event.target.value)} className={inputClass} /></Field>
+      <Field label={`Damaged / written off (${packUnitLabel(product?.packType)})`}><input required name="damagedQuantityPacks" type="number" min="0" step="1" value={damage} onChange={(event) => setDamage(event.target.value)} className={inputClass} /></Field>
       <Field label="Damage reason"><input name="damageReason" required={Number(damage) > 0} value={damageReason} onChange={(event) => setDamageReason(event.target.value)} className={inputClass} /></Field>
-      <Field label="Physical closing stock (pieces)"><input required name="closingStockPieces" type="number" min="0" step="1" value={closing} onChange={(event) => setClosing(event.target.value)} className={inputClass} /></Field>
-      <div className="rounded-lg border border-primary/20 bg-secondary/50 p-3"><div className="text-[10px] font-semibold uppercase text-secondary-foreground">Calculated production</div><div className="mt-1 text-lg font-bold text-primary">{Number.isFinite(produced) ? produced.toLocaleString() : '—'} pieces</div><p className="mt-1 text-[10px] text-slate-600">Closing + damage − opening. Sales are dispatched from Sales.</p></div>
+      <Field label={`Physical closing stock (${packUnitLabel(product?.packType)})`}><input required name="closingStockPacks" type="number" min="0" step="1" value={closing} onChange={(event) => setClosing(event.target.value)} className={inputClass} /></Field>
+      <div className="rounded-lg border border-primary/20 bg-secondary/50 p-3"><div className="text-[10px] font-semibold uppercase text-secondary-foreground">Calculated production</div><div className="mt-1 text-lg font-bold text-primary">{Number.isFinite(produced) ? produced.toLocaleString() : '—'} {packUnitLabel(summary?.packType)}</div><p className="mt-1 text-[10px] text-slate-600">Closing + sales + damage − opening − other net movements.</p></div>
+      {summary && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs"><div className="font-semibold">Stock movements on {formatDate(date)}</div><div className="mt-1 text-slate-500">Sales dispatched: {sales.toLocaleString()} {packUnitLabel(summary.packType)} · Other net changes: {otherMovementNet > 0 ? '+' : ''}{otherMovementNet.toLocaleString()} {packUnitLabel(summary.packType)}{summary.loosePieces ? ` · ${summary.loosePieces.toLocaleString()} loose pieces excluded` : ''}</div></div>}
     </div>
+    {summaryQuery.isError && <p role="alert" className="mt-3 text-xs text-rose-700">Daily stock summary could not be loaded: {messageFor(summaryQuery.error)}</p>}
+    {product && !product.packType && <p role="alert" className="mt-3 text-xs text-rose-700">Configure this product’s box or carton size before recording pack-based production.</p>}
     {product?.recipe && <p className="mt-3 text-xs text-slate-500">This product recipe is measured per 1,000-litre tank. Record the number of tanks made in Raw Material Management to calculate and deduct ingredient use.</p>}
     {product?.recipeRequired && !product.recipe && <p role="alert" className="mt-3 text-xs text-rose-700">This product requires a recipe before production can be posted.</p>}
     {duplicate && <p role="alert" className="mt-3 text-xs text-rose-700">A daily production record already exists for this product and date.</p>}
@@ -299,6 +330,7 @@ function ProductDialog({ product, materials, message, onClose, onSave, disabled 
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const submittedPackType = String(form.get('packType') || '') as '' | 'Box' | 'Carton'
+    if (submittedPackType !== 'Box' && submittedPackType !== 'Carton') return
     const validIngredients = ingredients
       .filter((ingredient) => ingredient.materialId && Number(ingredient.quantityPerTank) > 0)
       .map((ingredient) => ({ materialId: ingredient.materialId, quantityPerTank: Number(ingredient.quantityPerTank) }))
@@ -309,9 +341,9 @@ function ProductDialog({ product, materials, message, onClose, onSave, disabled 
       unit: String(form.get('unit')),
       flavour: String(form.get('flavour')) as 'Mango' | 'Pineapple milk',
       price: Number(form.get('price')),
-      packType: submittedPackType || undefined,
-      piecesPerPack: submittedPackType ? Number(form.get('piecesPerPack')) : undefined,
-      packWeightKg: submittedPackType ? Number(form.get('packWeightKg')) : undefined,
+      packType: submittedPackType,
+      piecesPerPack: Number(form.get('piecesPerPack')),
+      packWeightKg: Number(form.get('packWeightKg')),
       recipeRequired,
       ingredients: validIngredients,
     }, validIngredients)
@@ -327,7 +359,7 @@ function ProductDialog({ product, materials, message, onClose, onSave, disabled 
           <Field label="Category"><select required name="category" defaultValue={product?.category ?? 'Cup'} className={inputClass}><option value="Cup">Cup</option><option value="Bottle">Bottle</option></select></Field>
           <Field label="Unit / pack size (ml)"><select required name="unit" defaultValue={product?.unit ?? '150 ml'} className={inputClass}>{productPackSizes.map((size) => <option key={size}>{size}</option>)}</select></Field>
           <Field label="Flavour"><select required name="flavour" defaultValue={product?.flavour ?? 'Mango'} className={inputClass}><option value="Mango">Mango</option><option value="Pineapple milk">Pineapple milk</option></select></Field>
-          <Field label="Outer pack type"><select name="packType" value={packType} onChange={(event) => setPackType(event.target.value as '' | 'Box' | 'Carton')} className={inputClass}><option value="">Not specified</option><option value="Box">Box</option><option value="Carton">Carton</option></select></Field>
+          <Field label="Outer pack type"><select required name="packType" value={packType} onChange={(event) => setPackType(event.target.value as '' | 'Box' | 'Carton')} className={inputClass}><option value="">Select Box or Carton</option><option value="Box">Box</option><option value="Carton">Carton</option></select></Field>
           <Field label="Pieces per box/carton"><input name="piecesPerPack" type="number" min="1" step="1" required={Boolean(packType)} disabled={!packType} defaultValue={product?.piecesPerPack} className={inputClass} placeholder="e.g. 24" /></Field>
           <Field label="Net product weight per box/carton (kg)"><input name="packWeightKg" type="number" min="0.001" step="any" required={Boolean(packType)} disabled={!packType} defaultValue={product?.packWeightKg} className={inputClass} placeholder="e.g. 4.8" /></Field>
           <Field label="Selling price per box/carton (UGX)"><input required name="price" type="number" min="1" step="1" defaultValue={product?.price} className={inputClass} placeholder="e.g. 24000" /><span className="mt-1 block text-[10px] font-normal text-slate-400">Sales uses this whole-UGX catalog price per outer pack.</span></Field>
@@ -353,25 +385,46 @@ function FinishedStockView({ products, movements, onSubmit, disabled }: { produc
     <form onSubmit={onSubmit} className="grid items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-6">
       <Field label="Product"><select required name="productId" className={inputClass}><option value="">Select product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} ({stockLabel(product)})</option>)}</select></Field>
       <Field label="Movement"><select name="movementKind" className={inputClass}><option value="receipt">Stock in / receipt</option><option value="adjustment-in">Adjustment increase</option><option value="adjustment-out">Adjustment decrease</option></select></Field>
-      <Field label="Quantity (pieces)"><input required name="quantityPieces" type="number" min="1" step="1" className={inputClass} /></Field>
+      <Field label="Quantity (boxes/cartons)"><input required name="quantityPacks" type="number" min="1" step="1" className={inputClass} /></Field>
       <Field label="Date"><input required name="date" type="date" defaultValue={today()} className={inputClass} /></Field>
       <Field label="Reason"><input required name="reason" className={inputClass} placeholder="Receipt or adjustment reason" /></Field>
       <button type="submit" disabled={disabled} className="rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">Post movement</button>
     </form>
-    {!movements.length ? <EmptyState title="No finished-stock movements" detail="Production, receipts, sales dispatches, damage, and adjustments appear here." /> : <div className="overflow-x-auto"><table className="w-full min-w-180 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Movement', 'Quantity', 'Reason', 'Reference'].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{movements.map((movement) => <tr key={movement.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3">{formatDate(movement.date)}</td><td className="px-4 py-3 font-semibold">{movement.productName}</td><td className="px-4 py-3">{movement.type}</td><td className={`px-4 py-3 font-semibold ${movement.direction === 'in' ? 'text-emerald-700' : 'text-rose-700'}`}>{movement.direction === 'in' ? '+' : '−'}{movement.quantityPieces.toLocaleString()} pcs</td><td className="px-4 py-3">{movement.reason || '—'}</td><td className="px-4 py-3">{movement.reference}</td></tr>)}</tbody></table></div>}
+    {!movements.length ? <EmptyState title="No finished-stock movements" detail="Production, receipts, sales dispatches, damage, and adjustments appear here." /> : <div className="overflow-x-auto"><table className="w-full min-w-180 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Movement', 'Quantity', 'Reason', 'Reference'].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{movements.map((movement) => {
+      const packMovement = movement.inventoryUnit === 'pack' && Number.isInteger(movement.quantityPacks)
+      const quantity = packMovement ? movement.quantityPacks ?? 0 : movement.quantityPieces ?? 0
+      const unit = packMovement ? packUnitLabel(movement.packTypeSnapshot) : 'pcs (legacy)'
+      return <tr key={movement.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3">{formatDate(movement.date)}</td><td className="px-4 py-3 font-semibold">{movement.productName}</td><td className="px-4 py-3">{movement.type}</td><td className={`px-4 py-3 font-semibold ${movement.direction === 'in' ? 'text-emerald-700' : 'text-rose-700'}`}>{movement.direction === 'in' ? '+' : '−'}{quantity.toLocaleString()} {unit}</td><td className="px-4 py-3">{movement.reason || '—'}</td><td className="px-4 py-3">{movement.reference}</td></tr>
+    })}</tbody></table></div>}
   </div>
 }
 
 function ProductionHistory({ runs, onSelect }: { runs: ProductionRunRecord[]; onSelect: (run: ProductionRunRecord) => void }) {
   if (!runs.length) return <EmptyState title="No production records" detail="Post a daily production record to see it here." />
-  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Opening', 'Legacy sales', 'Damage', 'Closing', 'Produced', 'Recipe', 'Reference', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{runs.map((run) => <tr key={run.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3">{formatDate(run.productionDate)}</td><td className="px-3 py-3 font-semibold">{run.productName}</td><td className="px-3 py-3">{run.openingStockPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.salesQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.damagedQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.closingStockPieces.toLocaleString()} pcs</td><td className="px-3 py-3 font-bold text-primary">{run.producedQuantityPieces.toLocaleString()} pcs</td><td className="px-3 py-3">{run.recipeVersion ? `v${run.recipeVersion}` : 'No recipe'}</td><td className="px-3 py-3 font-semibold">{run.reference}</td><td className="px-3 py-3"><button type="button" onClick={() => onSelect(run)} aria-label={`View production record ${run.reference}`} className="grid size-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100"><Icons.Eye className="size-4" /></button></td></tr>)}</tbody></table></div>
+  return <div className="overflow-x-auto"><table className="w-full min-w-180 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Opening', 'Sales', 'Damage', 'Closing', 'Produced', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{runs.map((run) => {
+    const packRun = run.inventoryUnit === 'pack'
+    const unit = packRun ? packUnitLabel(run.packTypeSnapshot) : 'pcs (legacy)'
+    const opening = packRun ? run.openingStockPacks ?? 0 : run.openingStockPieces ?? 0
+    const sales = packRun ? run.salesQuantityPacks ?? 0 : run.salesQuantityPieces ?? 0
+    const damage = packRun ? run.damagedQuantityPacks ?? 0 : run.damagedQuantityPieces ?? 0
+    const closing = packRun ? run.closingStockPacks ?? 0 : run.closingStockPieces ?? 0
+    const produced = packRun ? run.producedQuantityPacks ?? 0 : run.producedQuantityPieces ?? 0
+    return <tr key={run.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3">{formatDate(run.productionDate)}</td><td className="px-3 py-3 font-semibold">{run.productName}</td><td className="px-3 py-3">{opening.toLocaleString()} {unit}</td><td className="px-3 py-3">{sales.toLocaleString()} {unit}</td><td className="px-3 py-3">{damage.toLocaleString()} {unit}</td><td className="px-3 py-3">{closing.toLocaleString()} {unit}</td><td className="px-3 py-3 font-bold text-primary">{produced.toLocaleString()} {unit}</td><td className="px-3 py-3"><button type="button" onClick={() => onSelect(run)} aria-label={`View production record ${run.reference}`} className="grid size-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100"><Icons.Eye className="size-4" /></button></td></tr>
+  })}</tbody></table></div>
 }
 
 function ProductionRunDetails({ run, onClose }: { run: ProductionRunRecord; onClose: () => void }) {
+  const packRun = run.inventoryUnit === 'pack'
+  const unit = packRun ? packUnitLabel(run.packTypeSnapshot) : 'pcs (legacy)'
+  const opening = packRun ? run.openingStockPacks ?? 0 : run.openingStockPieces ?? 0
+  const sales = packRun ? run.salesQuantityPacks ?? 0 : run.salesQuantityPieces ?? 0
+  const damage = packRun ? run.damagedQuantityPacks ?? 0 : run.damagedQuantityPieces ?? 0
+  const closing = packRun ? run.closingStockPacks ?? 0 : run.closingStockPieces ?? 0
+  const produced = packRun ? run.producedQuantityPacks ?? 0 : run.producedQuantityPieces ?? 0
   return <div className="fixed inset-0 z-80 grid place-items-center bg-slate-950/45 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section role="dialog" aria-modal="true" aria-labelledby="production-run-detail-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-2xl">
       <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><p className="text-xs text-slate-400">{run.reference} · {formatDate(run.productionDate)}</p><h2 id="production-run-detail-title" className="mt-1 text-base font-bold">{run.productName}</h2></div><button type="button" aria-label="Close production details" onClick={onClose} className="grid size-8 place-items-center rounded-md text-slate-400"><Icons.X className="size-4" /></button></header>
-      <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3"><Detail label="Opening stock" value={`${run.openingStockPieces.toLocaleString()} pcs`} /><Detail label="Legacy sales entries" value={`${run.salesQuantityPieces.toLocaleString()} pcs`} /><Detail label="Damage" value={`${run.damagedQuantityPieces.toLocaleString()} pcs`} /><Detail label="Closing stock" value={`${run.closingStockPieces.toLocaleString()} pcs`} /><Detail label="Produced" value={`${run.producedQuantityPieces.toLocaleString()} pcs`} /><Detail label="Recipe" value={run.recipeVersion ? `Version ${run.recipeVersion}` : 'No recipe'} /></div>
+      <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3"><Detail label="Opening stock" value={`${opening.toLocaleString()} ${unit}`} /><Detail label={packRun ? 'Recorded sales' : 'Legacy sales'} value={`${sales.toLocaleString()} ${unit}`} /><Detail label="Damage" value={`${damage.toLocaleString()} ${unit}`} /><Detail label="Closing stock" value={`${closing.toLocaleString()} ${unit}`} /><Detail label="Produced" value={`${produced.toLocaleString()} ${unit}`} /><Detail label="Recipe" value={run.recipeVersion ? `Version ${run.recipeVersion}` : 'No recipe'} /></div>
       <p className="border-t border-slate-100 px-5 py-4 text-xs text-slate-500">Raw-material usage is recorded separately in Raw Material Management using the number of 1,000-litre tanks made.</p>
       {run.damageReason && <p className="border-t border-slate-100 px-5 py-4 text-xs"><span className="font-semibold">Damage reason:</span> {run.damageReason}</p>}
       <footer className="flex justify-end border-t border-slate-100 px-5 py-4"><button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Close</button></footer>
