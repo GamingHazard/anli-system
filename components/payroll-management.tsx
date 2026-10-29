@@ -79,7 +79,7 @@ function statutoryRuleTemplate(): PayrollStatutoryRule {
 
 export default function PayrollManagementPage({ state, initialRunId = null, currentUser }: PayrollManagementProps) {
   const roles = currentUser.roles
-  const canRead = hasAnyDepartmentRole(roles, ['Human Resource', 'General Manager', 'Accountant'])
+  const canRead = hasAnyDepartmentRole(roles, ['Human Resource', 'General Manager', 'Admin'])
   const canPrepare = hasDepartmentRole(roles, 'Human Resource')
   const canManagerApprove = hasDepartmentRole(roles, 'General Manager')
   const canDirectorApprove = roles.includes('Super Admin')

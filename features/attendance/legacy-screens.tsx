@@ -15,11 +15,13 @@ export function AttendancePage({
   employeesLoaded,
   employeeLoadError,
   onRetry,
+  canEdit,
 }: {
   state: ErpState;
   employeesLoaded: boolean;
   employeeLoadError: string;
   onRetry: () => void;
+  canEdit: boolean;
 }) {
   const [workDate, setWorkDate] = useState(companyWorkDate);
   const [department, setDepartment] = useState("All departments");
@@ -178,7 +180,7 @@ export function AttendancePage({
             records remain archived in that browser and were not imported.
           </p>
         </div>
-        <button
+        {canEdit && <button
           type="button"
           onClick={() => {
             setSaveError("");
@@ -195,7 +197,7 @@ export function AttendancePage({
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Icons.ClipboardCheck className="size-4" /> Add attendance
-        </button>
+        </button>}
       </div>
       {!employeesLoaded && (
         <p
@@ -539,7 +541,7 @@ export function AttendancePage({
                                           setWorkDate(date);
                                           setExpandedMonth(month);
                                           if (record) setSelectedRecord(record);
-                                          else setShowDialog(true);
+                                          else if (canEdit) setShowDialog(true);
                                         }}
                                         className={`relative mx-auto grid size-7 place-items-center rounded-md font-semibold transition hover:ring-2 hover:ring-slate-300 ${cellColor}`}
                                       >
@@ -583,7 +585,7 @@ export function AttendancePage({
           )}
         </div>
       </section>
-      {showDialog && (
+      {showDialog && canEdit && (
         <AttendanceDialog
           employees={departmentEmployees}
           records={dayAttendanceQuery.data?.records ?? []}

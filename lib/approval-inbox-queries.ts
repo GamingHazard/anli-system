@@ -17,10 +17,11 @@ export const approvalInboxQueryKeys = {
   inbox: ['approval-inbox', 'list'] as const,
 }
 
-export function useApprovalInbox() {
+export function useApprovalInbox(enabled = true) {
   return useQuery({
     queryKey: approvalInboxQueryKeys.inbox,
     queryFn: getApprovalInbox,
+    enabled,
     staleTime: 15_000,
     refetchInterval: 30_000,
   })

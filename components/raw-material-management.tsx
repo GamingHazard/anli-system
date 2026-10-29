@@ -108,7 +108,11 @@ function statusClass(status: string) {
   return status === 'In stock' ? 'bg-emerald-50 text-emerald-700' : status === 'Low stock' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
 }
 
-export default function RawMaterialManagement() {
+export default function RawMaterialManagement({
+  canEdit,
+}: {
+  canEdit: boolean
+}) {
   const client = useQueryClient()
   const [view, setView] = useState<View>('Inventory')
   const [search, setSearch] = useState('')
@@ -533,9 +537,9 @@ export default function RawMaterialManagement() {
       </div>
 
       {view !== 'Daily production use' && <div className="flex justify-end gap-2 border-b border-slate-100 px-4 py-3">
-        {view === 'Inventory' && <button type="button" onClick={() => { setDialog('material'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.PackagePlus className="size-4" /> Add material</button>}
-        {view === 'Stock-in history' && <button type="button" onClick={() => { setDialog('receipt'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowDownToLine className="size-4" /> Record stock-in</button>}
-        {view === 'All movements' && <>
+        {canEdit && view === 'Inventory' && <button type="button" onClick={() => { setDialog('material'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.PackagePlus className="size-4" /> Add material</button>}
+        {canEdit && view === 'Stock-in history' && <button type="button" onClick={() => { setDialog('receipt'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowDownToLine className="size-4" /> Record stock-in</button>}
+        {canEdit && view === 'All movements' && <>
           <button type="button" onClick={() => { setDialog('adjustment'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.SlidersHorizontal className="size-4" /> Adjust stock</button>
           <button type="button" onClick={() => { setDialog('transfer'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowLeftRight className="size-4" /> Transfer stock</button>
         </>}
@@ -544,6 +548,7 @@ export default function RawMaterialManagement() {
       {view === 'Inventory' && <InventoryTable
         materials={visibleMaterials}
         locationFilter={locationFilter}
+        canEdit={canEdit}
         onConfigure={(material, location) => { setSelectedMaterial(material); setSelectedLocation(location); setDialog('location'); setMessage('') }}
         onEdit={(material) => { setSelectedMaterial(material); setDialog('editMaterial'); setMessage('') }}
         onDelete={(material) => { setSelectedMaterial(material); setDialog('deleteMaterial'); setMessage('') }}
@@ -585,13 +590,14 @@ export default function RawMaterialManagement() {
         onDownloadUsage={downloadUsagePdf}
         onSubmit={submitUsage}
         disabled={usageMutation.isPending}
+        canEdit={canEdit}
       />}
 
       {(message || isPending) && <p role="status" className="border-t border-slate-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">{isPending ? 'Saving inventory change…' : message}</p>}
       <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Recipe quantities are for one 1,000-litre tank. Direct usage edits append stock correction movements; legacy production-run usage records are retained as read-only history.</footer>
     </section>
 
-    {dialog && <InventoryDialog
+    {dialog && canEdit && <InventoryDialog
       mode={dialog}
       key={`${dialog}-${selectedMaterial?.id ?? ''}`}
       materials={materials}
@@ -604,7 +610,7 @@ export default function RawMaterialManagement() {
       pending={isPending}
       message={message}
     />}
-    {editingUsage && <ProductionUsageEditDialog
+    {editingUsage && canEdit && <ProductionUsageEditDialog
       key={editingUsage.id}
       usage={editingUsage}
       products={products.filter((product) => product.active && product.recipe)}
@@ -617,7 +623,7 @@ export default function RawMaterialManagement() {
   </div>
 }
 
-function InventoryTable({ materials, locationFilter, onConfigure, onEdit, onDelete }: { materials: ProductionMaterial[]; locationFilter: string; onConfigure: (material: ProductionMaterial, location: string) => void; onEdit: (material: ProductionMaterial) => void; onDelete: (material: ProductionMaterial) => void }) {
+function InventoryTable({ materials, locationFilter, canEdit, onConfigure, onEdit, onDelete }: { materials: ProductionMaterial[]; locationFilter: string; canEdit: boolean; onConfigure: (material: ProductionMaterial, location: string) => void; onEdit: (material: ProductionMaterial) => void; onDelete: (material: ProductionMaterial) => void }) {
   if (!materials.length) return <EmptyState title="No raw materials yet" detail="Add a shared raw material, then record stock receipts to establish its balance." />
   const rows = materials.flatMap((material) => {
     const balances = locationFilter === 'All locations'
@@ -626,19 +632,21 @@ function InventoryTable({ materials, locationFilter, onConfigure, onEdit, onDele
     return balances.map((balance) => ({ material, balance }))
   })
   if (!rows.length) return <EmptyState title="No stock configured at this location" detail="Receive or transfer stock to this location to add a balance record." />
-  return <div className="overflow-x-auto"><table className="w-full min-w-230 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Code', 'Material', 'Category', 'Location', 'Available', 'Reorder level', 'Responsible', 'Status', 'Actions'].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{rows.map(({ material, balance }) => <InventoryRow
+  return <div className="overflow-x-auto"><table className="w-full min-w-230 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Code', 'Material', 'Category', 'Location', 'Available', 'Reorder level', 'Responsible', 'Status', ...(canEdit ? ['Actions'] : [])].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{rows.map(({ material, balance }) => <InventoryRow
     key={`${material.id}-${balance.location}`}
     material={material}
     balance={balance}
+    canEdit={canEdit}
     onConfigure={onConfigure}
     onEdit={onEdit}
     onDelete={onDelete}
   />)}</tbody></table></div>
 }
 
-function InventoryRow({ material, balance, onConfigure, onEdit, onDelete }: {
+function InventoryRow({ material, balance, canEdit, onConfigure, onEdit, onDelete }: {
   material: ProductionMaterial
   balance: RawMaterialLocationBalance
+  canEdit: boolean
   onConfigure: (material: ProductionMaterial, location: string) => void
   onEdit: (material: ProductionMaterial) => void
   onDelete: (material: ProductionMaterial) => void
@@ -672,7 +680,7 @@ function InventoryRow({ material, balance, onConfigure, onEdit, onDelete }: {
     <td className="px-3 py-3">{balance.reorderThreshold.toLocaleString()} {material.unit}</td>
     <td className="px-3 py-3">{balance.responsibleUserName ?? 'Not assigned'}</td>
     <td className="px-3 py-3"><span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${statusClass(status)}`}>{status}</span></td>
-    <td className="px-3 py-3">
+    {canEdit && <td className="px-3 py-3">
       <div ref={menuRef} className="relative flex justify-end">
         <button
           type="button"
@@ -688,7 +696,7 @@ function InventoryRow({ material, balance, onConfigure, onEdit, onDelete }: {
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onDelete(material) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-rose-700 hover:bg-rose-50">Delete material</button>
         </div>}
       </div>
-    </td>
+    </td>}
   </tr>
 }
 
@@ -712,7 +720,7 @@ function AlertTable({ alerts, materials }: { alerts: RawMaterialAlert[]; materia
   })}</tbody></table></div>
 }
 
-function ProductionUseView({ products, filterProducts, selectedProductId, onSelectProduct, product, productionDate, onProductionDate, locations, location, onLocation, tanks, onTanks, preview, insufficient, usages, period, onPeriod, from, onFrom, to, onTo, productFilter, onProductFilter, expandedId, onToggleUsage, onEditUsage, onDownloadUsage, onSubmit, disabled }: {
+function ProductionUseView({ products, filterProducts, selectedProductId, onSelectProduct, product, productionDate, onProductionDate, locations, location, onLocation, tanks, onTanks, preview, insufficient, usages, period, onPeriod, from, onFrom, to, onTo, productFilter, onProductFilter, expandedId, onToggleUsage, onEditUsage, onDownloadUsage, onSubmit, disabled, canEdit }: {
   products: ProductionProduct[]
   filterProducts: ProductionProduct[]
   selectedProductId: string
@@ -742,10 +750,11 @@ function ProductionUseView({ products, filterProducts, selectedProductId, onSele
   onDownloadUsage: (usage: ProductionMaterialUsageRecord) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   disabled: boolean
+  canEdit: boolean
 }) {
   const invalidDateRange = Boolean(from && to && from > to)
   return <div className="space-y-5 p-4">
-    <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+    {canEdit && <form onSubmit={onSubmit} className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
       <div><h3 className="text-sm font-bold">Record daily tank production use</h3><p className="mt-1 text-xs text-slate-500">Select the product and its saved recipe. Material use is calculated from the recipe for each 1,000-litre tank and deducted from the selected store.</p></div>
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Product"><select required value={selectedProductId} onChange={(event) => onSelectProduct(event.target.value)} className={inputClass}><option value="">Select a product</option>{products.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}</select></Field>
@@ -758,7 +767,7 @@ function ProductionUseView({ products, filterProducts, selectedProductId, onSele
       {product?.recipe && <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white"><table className="w-full min-w-140 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Ingredient', 'Per 1,000-litre tank', `Total for ${Number(tanks) || 0} tank(s)`, 'Available at selected store'].map((label) => <th key={label} className="px-3 py-2.5">{label}</th>)}</tr></thead><tbody>{preview.map((line) => <tr key={line.materialId} className="border-t border-slate-100"><td className="px-3 py-2.5 font-semibold">{line.materialName}</td><td className="px-3 py-2.5">{line.quantityPerTank.toLocaleString()} {line.unit}</td><td className="px-3 py-2.5 font-bold">{line.total.toLocaleString()} {line.unit}</td><td className={`px-3 py-2.5 ${line.available < line.total ? 'font-semibold text-rose-700' : 'text-emerald-700'}`}>{line.available.toLocaleString()} {line.unit}</td></tr>)}</tbody></table></div>}
       {insufficient && <p role="alert" className="text-xs font-semibold text-rose-700">Insufficient {insufficient} stock at {location}; posting is blocked.</p>}
       <button type="submit" disabled={disabled || !product?.recipe || !preview.length || Boolean(insufficient) || !validDateInput(productionDate) || !Number.isFinite(Number(tanks)) || Number(tanks) <= 0} className="rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">{disabled ? 'Posting use…' : 'Post raw-material use'}</button>
-    </form>
+    </form>}
     <section aria-labelledby="usage-history-heading" className="space-y-4">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div><h3 id="usage-history-heading" className="text-sm font-bold text-slate-900">Daily production-use history</h3><p className="mt-1 text-xs text-slate-500">Open a record to review the ingredient breakdown and traceability details.</p></div>
@@ -811,7 +820,7 @@ function ProductionUseView({ products, filterProducts, selectedProductId, onSele
               <div className="flex shrink-0 items-center gap-2 pl-[52px] sm:pl-0">
                 <span aria-hidden="true" className="hidden flex-1 items-center justify-center gap-1.5 text-[10px] font-medium tracking-wide text-slate-400 sm:inline-flex"><span className="h-px w-5 bg-slate-200" />{expanded ? 'Click to collapse' : 'Click to expand'}<span className="h-px w-5 bg-slate-200" /></span>
                 <button type="button" onClick={() => onDownloadUsage(usage)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"><Icons.Printer className="size-3.5" /><span>PDF</span></button>
-                <button type="button" disabled={runLinked} title={runLinked ? 'Legacy run-linked usage is read-only to keep the production-run ledger consistent.' : 'Edit production usage'} onClick={() => onEditUsage(usage)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-[11px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"><Icons.Pencil className="size-3.5" /><span>Edit</span></button>
+                {canEdit && <button type="button" disabled={runLinked} title={runLinked ? 'Legacy run-linked usage is read-only to keep the production-run ledger consistent.' : 'Edit production usage'} onClick={() => onEditUsage(usage)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-[11px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"><Icons.Pencil className="size-3.5" /><span>Edit</span></button>}
               </div>
             </div>
             <div id={panelId} hidden={!expanded}>

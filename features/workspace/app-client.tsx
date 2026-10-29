@@ -4,7 +4,13 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { hasAnyDepartmentRole, hasDepartmentRole } from "@/lib/authorization";
+import {
+  canAccessPath,
+  canAccessSection,
+  defaultPathForRoles,
+  hasAnyDepartmentRole,
+  hasDepartmentRole,
+} from "@/lib/authorization";
 import { customerPath, employeePath, pathForSection, payrollPath, salaryAdvancePath, sectionForPath } from "@/lib/app-routes";
 import { importLegacyCustomersOnce } from "@/lib/customer-migration";
 import { importLegacySalesOnce } from "@/lib/sales-migration";
@@ -57,9 +63,11 @@ export default function AppClient({
   const setActive = useCallback(
     (section: string) => {
       const path = pathForSection(section);
-      if (path) router.push(path);
+      if (path && currentUser && canAccessSection(currentUser.roles, section)) {
+        router.push(path);
+      }
     },
-    [router],
+    [currentUser, router],
   );
   const openEmployee = useCallback(
     (id: string) => {
@@ -101,7 +109,6 @@ export default function AppClient({
     hasAnyDepartmentRole(currentUser.roles, [
       "Sales Manager",
       "General Manager",
-      "Admin",
     ]),
   );
   const selectedEmployee = state.employees.find(
@@ -124,6 +131,7 @@ export default function AppClient({
     hasAnyDepartmentRole(currentUser.roles, [
       "Sales Manager",
       "General Manager",
+      "Admin",
       "Super Admin",
     ]),
   );
@@ -211,7 +219,11 @@ export default function AppClient({
     };
   }, [currentUser, companyProfileLoadAttempt]);
   useEffect(() => {
-    if (!currentUser || currentUser.mustChangePassword) {
+    if (
+      !currentUser ||
+      currentUser.mustChangePassword ||
+      !canAccessSection(currentUser.roles, "Employee Profiles")
+    ) {
       setEmployeesLoaded(false);
       setEmployeeLoadError("");
       setState((current) => ({
@@ -425,7 +437,11 @@ export default function AppClient({
       if (pathname !== "/") router.replace("/");
       return;
     }
-    if (pathname === "/") router.replace("/dashboard");
+    const defaultPath = defaultPathForRoles(currentUser.roles);
+    if (pathname === "/") router.replace(defaultPath);
+    else if (!canAccessPath(currentUser.roles, pathname)) {
+      router.replace(defaultPath);
+    }
   }, [authLoading, currentUser, pathname, router]);
   useEffect(() => {
     const handler = (event: Event) => {
@@ -494,6 +510,7 @@ export default function AppClient({
     hasAnyDepartmentRole(currentUser.roles, [
       "Inventory Manager",
       "General Manager",
+      "Admin",
     ]),
   );
   const assetCanEdit = Boolean(
@@ -503,6 +520,9 @@ export default function AppClient({
     currentUser && companyProfileLoaded
       ? state.companyProfile.logo.url || publicBrand.logoUrl
       : publicBrand.logoUrl;
+  const routeAllowed = Boolean(
+    currentUser && canAccessPath(currentUser.roles, pathname),
+  );
   useEffect(() => {
     document.title = `${companyName} | Business Operations Suite`;
   }, [companyName]);
@@ -512,7 +532,11 @@ export default function AppClient({
       if (pathname !== "/") router.replace("/");
       return;
     }
-    if (pathname === "/") router.replace("/dashboard");
+    const defaultPath = defaultPathForRoles(currentUser.roles);
+    if (pathname === "/") router.replace(defaultPath);
+    else if (!canAccessPath(currentUser.roles, pathname)) {
+      router.replace(defaultPath);
+    }
   }, [authLoading, currentUser, pathname, router]);
   if (authLoading)
     return (
@@ -641,6 +665,7 @@ export default function AppClient({
             canReadAssets={assetCanRead}
             canReadCustomers={customerCanRead}
             canReadSales={salesCanRead}
+            currentUser={currentUser}
           />
           <div
             className={`transition-[margin] duration-200 ${collapsed ? "lg:ml-[76px]" : "lg:ml-[252px]"}`}
@@ -661,6 +686,13 @@ export default function AppClient({
               />
             )}
             <main className="mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8">
+              {routeAllowed ? (
+                children
+              ) : (
+                <p role="status" className="text-sm text-slate-500">
+                  Redirecting to an authorized section…
+                </p>
+              )}
               {companyProfileError && (
                 <div
                   role="alert"
@@ -680,7 +712,6 @@ export default function AppClient({
                   </button>
                 </div>
               )}
-              {children}
             </main>
           </div>
         </div>

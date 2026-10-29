@@ -83,6 +83,9 @@ export default function AuditWorkspace({
   targetUserId?: string
 }) {
   const isSuperAdmin = currentUser.roles.includes('Super Admin')
+  const canReadAudit = currentUser.roles.some((role) =>
+    ['Super Admin', 'Admin', 'General Manager'].includes(role),
+  )
   const [accounts, setAccounts] = useState<UserAccount[]>([])
   const [eventTypes, setEventTypes] = useState<AuditEventType[]>([])
   const [categories, setCategories] = useState<string[]>([])
@@ -119,33 +122,52 @@ export default function AuditWorkspace({
   const activeTabCategories = selectedTab.id === 'all' ? undefined : selectedTab.categories || undefined
 
   const loadFilterOptions = useCallback(async () => {
-    if (!isSuperAdmin || targetUserId) return
+    if (!canReadAudit || targetUserId) return
     setFilterLoadError('')
-    const results = await Promise.allSettled([listUsers(), listAuditEventTypes()])
-    const failures = results.filter((result) => result.status === 'rejected')
-    if (results[0]?.status === 'fulfilled') setAccounts(results[0].value)
-    if (results[1]?.status === 'fulfilled') {
-      setEventTypes(results[1].value.eventTypes)
-      setCategories(results[1].value.categories)
-      setResourceTypes(results[1].value.resourceTypes)
+    const applyEventTypes = (result: Awaited<ReturnType<typeof listAuditEventTypes>>) => {
+      setEventTypes(result.eventTypes)
+      setCategories(result.categories)
+      setResourceTypes(result.resourceTypes)
     }
-    if (failures.length) {
-      const failure = failures[0]
-      const cause = failure?.status === 'rejected' ? failure.reason : undefined
+    if (isSuperAdmin) {
+      const [usersResult, eventTypesResult] = await Promise.allSettled([
+        listUsers(),
+        listAuditEventTypes(),
+      ])
+      if (usersResult.status === 'fulfilled') setAccounts(usersResult.value)
+      if (eventTypesResult.status === 'fulfilled') {
+        applyEventTypes(eventTypesResult.value)
+      }
+      const failure = [usersResult, eventTypesResult].find(
+        (result) => result.status === 'rejected',
+      )
+      if (failure?.status === 'rejected') {
+        const cause = failure.reason
+        setFilterLoadError(
+          cause instanceof ApiError
+            ? cause.message
+            : 'Some filter options could not be loaded.',
+        )
+      }
+      return
+    }
+    try {
+      applyEventTypes(await listAuditEventTypes())
+    } catch (cause) {
       setFilterLoadError(
         cause instanceof ApiError
           ? cause.message
-          : 'Some filter options could not be loaded.',
+          : 'Audit filter options could not be loaded.',
       )
     }
-  }, [isSuperAdmin, targetUserId])
+  }, [canReadAudit, isSuperAdmin, targetUserId])
 
   useEffect(() => {
     void loadFilterOptions()
   }, [loadFilterOptions])
 
   useEffect(() => {
-    if (!isSuperAdmin) return
+    if (!canReadAudit) return
     let mounted = true
     setLoading(true)
     setError('')
@@ -175,7 +197,7 @@ export default function AuditWorkspace({
       if (mounted) setLoading(false)
     })
     return () => { mounted = false }
-  }, [activeTabCategories, applied, isSuperAdmin, refreshVersion, targetUserId])
+  }, [activeTabCategories, applied, canReadAudit, refreshVersion, targetUserId])
 
   const loadMore = async () => {
     if (!cursor || loadingMore) return
@@ -250,7 +272,7 @@ export default function AuditWorkspace({
     applied.to && { key: 'to' as const, label: `To ${applied.to}` },
   ].filter((filter): filter is { key: keyof AppliedFilters; label: string } => Boolean(filter))
 
-  if (!isSuperAdmin) {
+  if (!canReadAudit) {
     return <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Audit records are restricted to Super Admin accounts.</p>
   }
 

@@ -93,8 +93,10 @@ export default function DisciplinaryLettersPage({ state, currentUser }: { state:
   const isHr = hasDepartmentRole(roles, 'Human Resource')
   const isSuperAdmin = roles.includes('Super Admin')
   const canReview = hasAnyDepartmentRole(roles, ['Human Resource', 'General Manager'])
+  const isReadOnly = roles.includes('Admin') && !roles.includes('Super Admin')
+  const canRead = canReview || isReadOnly
   const activeEmployees = state.employees.filter((employee) => employee.status === 'Active')
-  const caseQuery = useDisciplinaryCases(canReview)
+  const caseQuery = useDisciplinaryCases(canRead)
   const employeeCaseQuery = useMyDisciplinaryCases(true)
   const approversQuery = useDisciplinaryApprovers(isHr)
   const policyQuery = useDisciplinaryPolicy(true)
@@ -244,7 +246,7 @@ export default function DisciplinaryLettersPage({ state, currentUser }: { state:
 
     {success && <div role="status" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div>}
     {error && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>}
-    {caseQuery.isError && canReview && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{asMessage(caseQuery.error)}</div>}
+    {caseQuery.isError && canRead && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{asMessage(caseQuery.error)}</div>}
     {employeeCaseQuery.isError && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{asMessage(employeeCaseQuery.error)}</div>}
     {isSuperAdmin && policyQuery.isError && <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{asMessage(policyQuery.error)}</div>}
 
@@ -260,11 +262,11 @@ export default function DisciplinaryLettersPage({ state, currentUser }: { state:
       </div>
     </details>}
 
-    {canReview && <section className="mb-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-bold">Review workspace</h3><p className="mt-1 text-xs text-slate-500">{isHr ? 'Cases are visible to HR; managers see cases assigned to them.' : 'Only cases assigned to your approval account are shown.'}</p></div>
+    {canRead && <section className="mb-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-bold">Review workspace</h3><p className="mt-1 text-xs text-slate-500">{isReadOnly ? 'Cases are available in read-only mode.' : isHr ? 'Cases are visible to HR; managers see cases assigned to them.' : 'Only cases assigned to your approval account are shown.'}</p></div>
       {caseQuery.isLoading ? <p className="p-6 text-sm text-slate-500">Loading cases…</p>
         : reviewerCases.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">No disciplinary cases found.</p>
-          : <div className="divide-y divide-slate-100">{reviewerCases.map((item) => <ReviewerCase key={item.id} item={item} currentUser={currentUser} isHr={isHr} busy={actionsBusy} responseText={responseTexts[item.id] || ''} setResponseText={(text) => setResponseTexts((current) => ({ ...current, [item.id]: text }))} onEdit={() => openEditComposer(item)} onAction={perform} mutations={{
+          : <div className="divide-y divide-slate-100">{reviewerCases.map((item) => <ReviewerCase key={item.id} item={item} currentUser={currentUser} isHr={isHr} readOnly={isReadOnly} busy={actionsBusy} responseText={responseTexts[item.id] || ''} setResponseText={(text) => setResponseTexts((current) => ({ ...current, [item.id]: text }))} onEdit={() => openEditComposer(item)} onAction={perform} mutations={{
             requestResponse: requestResponseMutation,
             noResponse: noResponseMutation,
             offlineResponse: offlineResponseMutation,
@@ -324,10 +326,11 @@ export default function DisciplinaryLettersPage({ state, currentUser }: { state:
   </div>
 }
 
-function ReviewerCase({ item, currentUser, isHr, busy, responseText, setResponseText, onEdit, onAction, mutations }: {
+function ReviewerCase({ item, currentUser, isHr, readOnly, busy, responseText, setResponseText, onEdit, onAction, mutations }: {
   item: DisciplinaryCase
   currentUser: UserAccount
   isHr: boolean
+  readOnly: boolean
   busy: boolean
   responseText: string
   setResponseText: (text: string) => void
@@ -355,7 +358,7 @@ function ReviewerCase({ item, currentUser, isHr, busy, responseText, setResponse
     'General Manager': item.assignedApprovers?.generalManager,
     'Super Admin': item.assignedApprovers?.superAdmin,
   }
-  const canApprove = pendingStage && (currentUser.roles.includes('Super Admin') || assignment[pendingStage] === currentUser.id && hasDepartmentRole(currentUser.roles, pendingStage as DisciplinaryApproverStage))
+  const canApprove = !readOnly && pendingStage && (currentUser.roles.includes('Super Admin') || assignment[pendingStage] === currentUser.id && hasDepartmentRole(currentUser.roles, pendingStage as DisciplinaryApproverStage))
   const canRequestResponse = isHr && item.responseRequired && !item.response?.text && !item.noResponseRecordedAt && ['Draft', 'Under investigation', 'Changes requested'].includes(item.status)
   const canSubmit = isHr && ['Draft', 'Under investigation', 'Changes requested'].includes(item.status)
   const canUploadEvidence = isHr && ['Draft', 'Under investigation', 'Awaiting employee response', 'Changes requested'].includes(item.status)

@@ -22,7 +22,7 @@ import {
   useUploadExpenseAttachment,
 } from '@/lib/expense-queries'
 import type { UserAccount } from '@/lib/user-api'
-import { hasAnyDepartmentRole, hasDepartmentRole } from '@/lib/authorization'
+import { hasAnyDepartmentRole } from '@/lib/authorization'
 
 type Props = {
   state: ErpState
@@ -124,9 +124,9 @@ function apiMessage(error: unknown) {
 
 export default function ExpenseManagement({ state, currentUser, onViewPayrollRun }: Props) {
   const roles = currentUser.roles
-  const canRead = hasAnyDepartmentRole(roles, ['Accountant', 'General Manager'])
-  const canCreate = hasDepartmentRole(roles, 'Accountant')
-  const canPay = hasDepartmentRole(roles, 'Accountant')
+  const canRead = hasAnyDepartmentRole(roles, ['Accountant', 'General Manager', 'Admin'])
+  const canCreate = hasAnyDepartmentRole(roles, ['Accountant', 'General Manager'])
+  const canPay = hasAnyDepartmentRole(roles, ['Accountant', 'General Manager'])
   const query = useExpenses({ limit: 200 }, canRead)
   const createMutation = useCreateExpense()
   const paymentMutation = useRecordExpensePayment()

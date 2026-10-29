@@ -20,6 +20,7 @@ import {
   type ProductionProduct,
   type ProductionRunRecord,
 } from '@/lib/user-api'
+import { useWorkspace } from '@/features/workspace/workspace-context'
 
 type View = 'Daily production' | 'Products' | 'Finished stock' | 'Production history'
 type IngredientDraft = { materialId: string; quantityPerTank: string }
@@ -52,6 +53,13 @@ function Field({ label, children, wide = false }: { label: string; children: Rea
 }
 
 export default function ProductionManagement() {
+  const { currentUser } = useWorkspace()
+  const canManageProduction = currentUser.roles.some((role) =>
+    ['Super Admin', 'Production Manager', 'Inventory Manager'].includes(role),
+  )
+  const canManageInventory = currentUser.roles.some((role) =>
+    ['Super Admin', 'Inventory Manager'].includes(role),
+  )
   const client = useQueryClient()
   const [view, setView] = useState<View>('Daily production')
   const [search, setSearch] = useState('')
@@ -237,7 +245,7 @@ export default function ProductionManagement() {
   if (workspace.isError) return <section className="rounded-xl border border-rose-200 bg-rose-50 p-6"><h2 className="font-semibold text-rose-800">Production data could not be loaded</h2><p className="mt-2 text-sm text-rose-700">{messageFor(workspace.error)}</p><button type="button" onClick={() => workspace.refetch()} className="mt-3 rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-800">Retry</button></section>
 
   return <div className="animate-in fade-in duration-300">
-    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Inventory Department</div><h2 className="text-2xl font-bold tracking-tight">Production management</h2><p className="mt-1 text-sm text-slate-500">Products, recipes, production, and finished-goods stock.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={exportCurrent} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700"><Icons.Download className="size-4" /> Export</button><button type="button" onClick={() => { setEditingProduct(null); setShowProductForm(true); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-700"><Icons.PackagePlus className="size-4" /> Add product</button></div></header>
+    <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Inventory Department</div><h2 className="text-2xl font-bold tracking-tight">Production management</h2><p className="mt-1 text-sm text-slate-500">Products, recipes, production, and finished-goods stock.</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={exportCurrent} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700"><Icons.Download className="size-4" /> Export</button>{canManageProduction && <button type="button" onClick={() => { setEditingProduct(null); setShowProductForm(true); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-700"><Icons.PackagePlus className="size-4" /> Add product</button>}</div></header>
 
     <section aria-label="Production summary" className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Metric label="Produced today" value={todayProduced.toLocaleString()} detail={`${todayRuns.length} production records · configured packs`} icon="Factory" tone="purple" productsProduced={productsProducedToday} />
@@ -250,15 +258,17 @@ export default function ProductionManagement() {
       <div role="tablist" aria-label="Production views" className="flex gap-1 overflow-x-auto border-b border-slate-200 px-4 pt-2">{(['Daily production', 'Products', 'Finished stock', 'Production history'] as View[]).map((item) => <button key={item} type="button" role="tab" aria-selected={view === item} onClick={() => setView(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item}</button>)}</div>
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 xl:flex-row xl:items-center xl:justify-between"><div><h3 className="text-sm font-bold">{view}</h3><p className="mt-1 text-xs text-slate-500">{view === 'Daily production' ? 'Record finished-goods counts here; raw-material use is recorded separately in Raw Material Management.' : view === 'Products' ? `${visibleProducts.length} finished products` : view === 'Finished stock' ? `${visibleMovements.length} movements` : `${visibleRuns.length} daily production records`}</p></div><div className="flex flex-wrap gap-2"><label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><Icons.Search className="size-4 text-slate-400" /><input aria-label={`Search ${view.toLowerCase()}`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products or references" className="w-44 bg-transparent text-xs outline-none" /></label>{view !== 'Products' && view !== 'Daily production' && <><select aria-label="Filter by product" value={productFilter} onChange={(event) => setProductFilter(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"><option>All products</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select><input aria-label="From date" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" /><input aria-label="To date" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" /></>}</div></div>
 
-      {view === 'Daily production' && <DailyProductionForm products={products.filter((product) => product.active)} runs={runs} onSubmit={submitProduction} disabled={runMutation.isPending} />}
-      {view === 'Products' && <ProductTable products={visibleProducts} onEdit={(product) => { setEditingProduct(product); setShowProductForm(true); setMessage('') }} onToggle={async (product) => {
+      {view === 'Daily production' && (canManageProduction
+        ? <DailyProductionForm products={products.filter((product) => product.active)} runs={runs} onSubmit={submitProduction} disabled={runMutation.isPending} />
+        : <p className="p-4 text-xs text-slate-500">Production records are view-only for this role.</p>)}
+      {view === 'Products' && <ProductTable products={visibleProducts} canEdit={canManageProduction} onEdit={(product) => { setEditingProduct(product); setShowProductForm(true); setMessage('') }} onToggle={async (product) => {
         try {
           await updateProductionProduct(product.id, { active: !product.active })
           setMessage(`${product.name} ${product.active ? 'deactivated' : 'activated'}.`)
           await refresh()
         } catch (error) { setMessage(messageFor(error)) }
       }} />}
-      {view === 'Finished stock' && <FinishedStockView products={products.filter((product) => product.active)} movements={visibleMovements} onSubmit={submitFinishedMovement} disabled={finishedReceiptMutation.isPending || adjustmentMutation.isPending} />}
+      {view === 'Finished stock' && <FinishedStockView canEdit={canManageInventory} products={products.filter((product) => product.active)} movements={visibleMovements} onSubmit={submitFinishedMovement} disabled={finishedReceiptMutation.isPending || adjustmentMutation.isPending} />}
       {view === 'Production history' && <ProductionHistory runs={visibleRuns} onSelect={setSelectedRun} />}
 
       {message && <p role="status" className="border-t border-slate-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">{message}</p>}
@@ -312,9 +322,9 @@ function DailyProductionForm({ products, runs, onSubmit, disabled }: { products:
   </form>
 }
 
-function ProductTable({ products, onEdit, onToggle }: { products: ProductionProduct[]; onEdit: (product: ProductionProduct) => void; onToggle: (product: ProductionProduct) => void }) {
+function ProductTable({ products, canEdit, onEdit, onToggle }: { products: ProductionProduct[]; canEdit: boolean; onEdit: (product: ProductionProduct) => void; onToggle: (product: ProductionProduct) => void }) {
   if (!products.length) return <EmptyState title="No finished products" detail="Add a product profile, packaging details, and its recipe composition." />
-  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Code', 'Product', 'Category', 'Flavour', 'Unit', 'Outer pack', 'Price / pack', 'On hand / available', 'Recipe', 'Status', ''].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{products.map((product) => <tr key={product.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3 font-mono font-semibold">{product.code}</td><td className="px-3 py-3 font-semibold text-slate-800">{product.name}</td><td className="px-3 py-3">{product.category}</td><td className="px-3 py-3">{product.flavour}</td><td className="px-3 py-3">{product.unit}</td><td className="px-3 py-3">{product.packType ? `${product.packType}: ${product.piecesPerPack} pcs · ${product.packWeightKg} kg` : '—'}</td><td className="px-3 py-3 font-semibold">{product.price ? new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX', maximumFractionDigits: 0 }).format(product.price) : 'Set price'}</td><td className="px-3 py-3 font-semibold">{stockLabel(product)}</td><td className="px-3 py-3">{product.recipe ? `${product.recipe.ingredients.length} ingredients · v${product.recipe.version}` : product.recipeRequired ? <span className="text-rose-700">Required</span> : 'Not set'}</td><td className="px-3 py-3">{product.active ? 'Active' : 'Inactive'}</td><td className="px-3 py-3"><div className="flex gap-1"><button type="button" onClick={() => onEdit(product)} className="rounded-md border border-slate-200 px-2 py-1.5 font-semibold">Edit</button><button type="button" onClick={() => onToggle(product)} className="rounded-md border border-slate-200 px-2 py-1.5">{product.active ? 'Deactivate' : 'Activate'}</button></div></td></tr>)}</tbody></table></div>
+  return <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['Code', 'Product', 'Category', 'Flavour', 'Unit', 'Outer pack', 'Price / pack', 'On hand / available', 'Recipe', 'Status', ...(canEdit ? ['Actions'] : [])].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead><tbody>{products.map((product) => <tr key={product.id} className="border-t border-slate-100 text-slate-600"><td className="px-3 py-3 font-mono font-semibold">{product.code}</td><td className="px-3 py-3 font-semibold text-slate-800">{product.name}</td><td className="px-3 py-3">{product.category}</td><td className="px-3 py-3">{product.flavour}</td><td className="px-3 py-3">{product.unit}</td><td className="px-3 py-3">{product.packType ? `${product.packType}: ${product.piecesPerPack} pcs · ${product.packWeightKg} kg` : '—'}</td><td className="px-3 py-3 font-semibold">{product.price ? new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX', maximumFractionDigits: 0 }).format(product.price) : 'Set price'}</td><td className="px-3 py-3 font-semibold">{stockLabel(product)}</td><td className="px-3 py-3">{product.recipe ? `${product.recipe.ingredients.length} ingredients · v${product.recipe.version}` : product.recipeRequired ? <span className="text-rose-700">Required</span> : 'Not set'}</td><td className="px-3 py-3">{product.active ? 'Active' : 'Inactive'}</td>{canEdit && <td className="px-3 py-3"><div className="flex gap-1"><button type="button" onClick={() => onEdit(product)} className="rounded-md border border-slate-200 px-2 py-1.5 font-semibold">Edit</button><button type="button" onClick={() => onToggle(product)} className="rounded-md border border-slate-200 px-2 py-1.5">{product.active ? 'Deactivate' : 'Activate'}</button></div></td>}</tr>)}</tbody></table></div>
 }
 
 function ProductDialog({ product, materials, message, onClose, onSave, disabled }: { product: ProductionProduct | null; materials: ProductionMaterial[]; message: string; onClose: () => void; onSave: (input: Parameters<typeof createProductionProduct>[0], ingredients: Parameters<typeof updateProductionRecipe>[1]) => void; disabled: boolean }) {
@@ -380,16 +390,16 @@ function ProductDialog({ product, materials, message, onClose, onSave, disabled 
   </div>
 }
 
-function FinishedStockView({ products, movements, onSubmit, disabled }: { products: ProductionProduct[]; movements: Awaited<ReturnType<typeof listFinishedStockMovements>>['movements']; onSubmit: (event: FormEvent<HTMLFormElement>) => void; disabled: boolean }) {
+function FinishedStockView({ products, movements, onSubmit, disabled, canEdit }: { products: ProductionProduct[]; movements: Awaited<ReturnType<typeof listFinishedStockMovements>>['movements']; onSubmit: (event: FormEvent<HTMLFormElement>) => void; disabled: boolean; canEdit: boolean }) {
   return <div className="space-y-5 p-4">
-    <form onSubmit={onSubmit} className="grid items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-6">
+    {canEdit && <form onSubmit={onSubmit} className="grid items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-6">
       <Field label="Product"><select required name="productId" className={inputClass}><option value="">Select product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} ({stockLabel(product)})</option>)}</select></Field>
       <Field label="Movement"><select name="movementKind" className={inputClass}><option value="receipt">Stock in / receipt</option><option value="adjustment-in">Adjustment increase</option><option value="adjustment-out">Adjustment decrease</option></select></Field>
       <Field label="Quantity (boxes/cartons)"><input required name="quantityPacks" type="number" min="1" step="1" className={inputClass} /></Field>
       <Field label="Date"><input required name="date" type="date" defaultValue={today()} className={inputClass} /></Field>
       <Field label="Reason"><input required name="reason" className={inputClass} placeholder="Receipt or adjustment reason" /></Field>
       <button type="submit" disabled={disabled} className="rounded-lg bg-primary px-3 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-40">Post movement</button>
-    </form>
+    </form>}
     {!movements.length ? <EmptyState title="No finished-stock movements" detail="Production, receipts, sales dispatches, damage, and adjustments appear here." /> : <div className="overflow-x-auto"><table className="w-full min-w-180 text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Date', 'Product', 'Movement', 'Quantity', 'Reason', 'Reference'].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>{movements.map((movement) => {
       const packMovement = movement.inventoryUnit === 'pack' && Number.isInteger(movement.quantityPacks)
       const quantity = packMovement ? movement.quantityPacks ?? 0 : movement.quantityPieces ?? 0

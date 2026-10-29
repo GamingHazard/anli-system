@@ -7,6 +7,7 @@ import { ChevronDown, Menu, X } from "lucide-react";
 import NotificationCenter from "@/components/notification-center";
 import { approvalInboxQueryKeys, useApprovalInbox } from "@/lib/approval-inbox-queries";
 import { initials, navGroups } from "@/lib/erp";
+import { canAccessSection } from "@/lib/authorization";
 import { getPendingOrderCount, UserAccount } from "@/lib/user-api";
 
 export const iconMap = Icons as unknown as Record<
@@ -26,6 +27,7 @@ export function Sidebar({
   canReadAssets,
   canReadCustomers,
   canReadSales,
+  currentUser,
 }: {
   active: string;
   setActive: (value: string) => void;
@@ -38,9 +40,12 @@ export function Sidebar({
   canReadAssets: boolean;
   canReadCustomers: boolean;
   canReadSales: boolean;
+  currentUser: UserAccount;
 }) {
   const queryClient = useQueryClient();
-  const approvalInboxQuery = useApprovalInbox();
+  const approvalInboxQuery = useApprovalInbox(
+    canAccessSection(currentUser.roles, "Approvals"),
+  );
   const pendingOrdersQuery = useQuery({
     queryKey: ["orders", "pending-count"],
     queryFn: getPendingOrderCount,
@@ -55,6 +60,7 @@ export function Sidebar({
       ...group,
       items: group.items.filter(
         (item) =>
+          canAccessSection(currentUser.roles, item.label) &&
           (item.label !== "Assets Management" || canReadAssets) &&
           (item.label !== "Customer Management" || canReadCustomers) &&
           (item.label !== "Sales" || canReadSales) &&

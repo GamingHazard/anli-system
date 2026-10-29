@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import AuditLogPanel from '@/components/audit-log'
 import { ApiError, USER_ROLES, createUser, listUsers, resetUserPassword, updateUser, updateUserStatus, type AccountStatus, type UserAccount, type UserRole } from '@/lib/user-api'
+import { canManageAccount, creatableRolesForAccountManager } from '@/lib/authorization'
 
 type ActivityEntry = { id: string; message: string; time: string }
 type PendingStatus = { account: UserAccount; status: 'Suspended' | 'Deactivated' | 'Active' }
@@ -70,12 +71,13 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
   const suspendedAccounts = accounts.filter((account) => account.status === 'Suspended')
   const assignedUniqueRoles = new Set(accounts.filter((account) => account.status !== 'Deactivated').flatMap((account) => account.roles).filter((role) => role !== 'Admin')).size
   const vacantRoles = roles.length - 1 - assignedUniqueRoles
-  const filteredAccounts = useMemo(() => accounts.filter((account) => {
+  const creatableRoles = creatableRolesForAccountManager(currentUser.roles)
+  const filteredAccounts = useMemo(() => accounts.filter((account) => canManageAccount(currentUser, account)).filter((account) => {
     const searchable = `${account.name} ${account.email} ${account.roles.join(' ')}`.toLowerCase()
     return searchable.includes(search.trim().toLowerCase())
       && (statusFilter === 'All statuses' || account.status === statusFilter)
       && (roleFilter === 'All roles' || account.roles.includes(roleFilter))
-  }).sort((left, right) => left.name.localeCompare(right.name)), [accounts, search, statusFilter, roleFilter])
+  }).sort((left, right) => left.name.localeCompare(right.name)), [accounts, currentUser, search, statusFilter, roleFilter])
 
   const addActivity = (messageText: string) => setActivity((entries) => [{ id: `${Date.now()}-${Math.random()}`, message: messageText, time: new Date().toISOString() }, ...entries].slice(0, 6))
   const openCreate = () => { setEditing(null); setMessage(''); setShowForm(true) }
@@ -90,6 +92,14 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
     const selectedRoles = form.getAll('roles').map(String) as UserRole[]
     if (!name || !email || selectedRoles.length === 0) {
       setMessage('Enter a name, email address, and at least one role.')
+      return
+    }
+    if (selectedRoles.includes('Admin') && selectedRoles.length > 1) {
+      setMessage('Admin must be assigned as the account’s only role.')
+      return
+    }
+    if (selectedRoles.some((role) => !creatableRoles.includes(role))) {
+      setMessage('You cannot assign one or more of the selected roles.')
       return
     }
     if (!editing && password.length < 8) {
@@ -191,7 +201,7 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
   return <div className="animate-in fade-in duration-300">
     <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
       <div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Settings</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">User management</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Manage account profiles, access status, and operational role assignments.</p></div>
-      <button type="button" onClick={openCreate} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-3.5 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"><Icons.UserRoundPlus className="size-4" />Create user</button>
+      {creatableRoles.length > 0 && <button type="button" onClick={openCreate} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-3.5 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"><Icons.UserRoundPlus className="size-4" />Create user</button>}
     </header>
 
     <div role="status" className="mb-5 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-900"><Icons.ShieldCheck className="mt-0.5 size-4 shrink-0" /><p>Accounts are stored on the server. New accounts must change their initial password the first time they sign in.</p></div>
@@ -230,7 +240,7 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
 
     {activity.length > 0 && <section className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white"><header className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold text-slate-900">Recent changes</h3><p className="mt-1 text-xs text-slate-500">Actions in this browser session; authoritative audit logging is not included.</p></header><div className="divide-y divide-slate-100">{activity.map((entry) => <div key={entry.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs font-medium text-slate-700">{entry.message}</span><time className="text-[10px] text-slate-400">{formatTimestamp(entry.time)}</time></div>)}</div></section>}
 
-    {showForm && <UserForm account={editing} accounts={accounts} message={message} saving={saving} onClose={() => setShowForm(false)} onSave={saveAccount} />}
+    {showForm && <UserForm account={editing} accounts={accounts} creatableRoles={creatableRoles} message={message} saving={saving} onClose={() => setShowForm(false)} onSave={saveAccount} />}
     {pendingStatus && <StatusDialog pending={pendingStatus} reason={suspensionReason} setReason={setSuspensionReason} saving={saving} onClose={() => setPendingStatus(null)} onConfirm={confirmStatus} />}
     {pendingPasswordReset && <Modal title="Reset user password" subtitle={`${pendingPasswordReset.name} · ${pendingPasswordReset.email}`} onClose={() => { if (!saving) setPendingPasswordReset(null) }}><div className="p-5"><p className="text-xs leading-5 text-slate-600">This will replace the current password, sign the user out of existing sessions, and require a password change at next sign-in. The generated six-character temporary password expires in 24 hours.</p><div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={saving} onClick={() => setPendingPasswordReset(null)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">Cancel</button><button type="button" disabled={saving} onClick={confirmPasswordReset} className="rounded-lg bg-violet-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-violet-800 disabled:opacity-50">{saving ? 'Resetting…' : 'Generate temporary password'}</button></div></div></Modal>}
     {passwordReset && <Modal title="Temporary password" subtitle={`${passwordReset.account.name} · ${passwordReset.account.email}`} onClose={() => { setPasswordReset(null); setCopyMessage('') }}><div className="p-5"><p className="text-xs leading-5 text-slate-600">Share this six-character temporary password with the user using a secure channel. It is shown only now, expires {formatTimestamp(passwordReset.expiresAt)}, and must be changed at their next sign-in.</p><code className="mt-4 block select-all break-all rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-sm text-slate-900">{passwordReset.temporaryPassword}</code>{copyMessage && <p role="status" className="mt-2 text-xs text-slate-600">{copyMessage}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={copyTemporaryPassword} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Icons.Copy className="size-3.5" />Copy password</button><button type="button" onClick={() => { setPasswordReset(null); setCopyMessage('') }} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90">Done</button></div></div></Modal>}
@@ -245,12 +255,17 @@ function SummaryMetric({ label, value, detail, icon, tone }: { label: string; va
   return <article className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex items-center justify-between"><span className={`grid size-9 place-items-center rounded-lg ${iconTone}`}><Icon className="size-4" /></span><span className="text-[9px] font-semibold uppercase text-slate-400">Live</span></div><div className="mt-3 text-xl font-bold tracking-tight text-slate-900">{value}</div><h3 className="mt-0.5 text-xs font-semibold text-slate-700">{label}</h3><p className="mt-1 text-[10px] text-slate-500">{detail}</p></article>
 }
 
-function UserForm({ account, accounts, message, saving, onClose, onSave }: { account: UserAccount | null; accounts: UserAccount[]; message: string; saving: boolean; onClose: () => void; onSave: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void> }) {
+function UserForm({ account, accounts, creatableRoles, message, saving, onClose, onSave }: { account: UserAccount | null; accounts: UserAccount[]; creatableRoles: UserRole[]; message: string; saving: boolean; onClose: () => void; onSave: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void> }) {
   const [selectedRoles, setSelectedRoles] = useState<UserRole[]>(account?.roles ?? [])
   const activeSuperAdmins = accounts.filter((candidate) => candidate.status === 'Active' && candidate.roles.includes('Super Admin'))
   const availableRoles = (role: UserRole) => role === 'Admin' || !accounts.some((candidate) => candidate.id !== account?.id && candidate.status !== 'Deactivated' && candidate.roles.includes(role))
   const toggleRole = (role: UserRole) => {
-    const next = selectedRoles.includes(role) ? selectedRoles.filter((item) => item !== role) : [...selectedRoles, role]
+    if (role === 'Admin') {
+      setSelectedRoles(selectedRoles.includes('Admin') ? [] : ['Admin'])
+      return
+    }
+    const compatibleRoles = selectedRoles.filter((item) => item !== 'Admin')
+    const next = compatibleRoles.includes(role) ? compatibleRoles.filter((item) => item !== role) : [...compatibleRoles, role]
     if (role === 'Super Admin') {
       if (!next.includes(role) && account?.status === 'Active' && account.roles.includes(role) && activeSuperAdmins.length === 1) return
     }
@@ -260,7 +275,7 @@ function UserForm({ account, accounts, message, saving, onClose, onSave }: { acc
     <form onSubmit={onSave} className="p-5">
       <div className="grid gap-4 sm:grid-cols-2"><Field label="Full name"><input required name="name" defaultValue={account?.name ?? ''} autoComplete="name" className={fieldClass} placeholder="Enter full name" /></Field><Field label="Email address"><input required name="email" type="email" defaultValue={account?.email ?? ''} autoComplete="email" className={fieldClass} placeholder="name@company.com" /></Field></div>
       {!account && <div className="mt-4"><Field label="Initial password"><input required name="password" type="password" minLength={8} autoComplete="new-password" className={fieldClass} placeholder="At least 8 characters" /></Field><p className="mt-1 text-[10px] text-slate-500">The password is hashed by the server. The new user must change it at first sign-in.</p></div>}
-      <section className="mt-5"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-xs font-bold text-slate-800">Assign roles</h3><span className="text-[10px] text-slate-400">Select one or more</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2">{roles.map((role) => { const available = availableRoles(role); const selected = selectedRoles.includes(role); const owner = accounts.find((candidate) => candidate.id !== account?.id && candidate.roles.includes(role) && candidate.status !== 'Deactivated'); const disabled = (!available && !selected) || (role === 'Super Admin' && selected && account?.status === 'Active' && account.roles.includes(role) && activeSuperAdmins.length === 1); return <label key={role} className={`flex min-h-11 items-center gap-2.5 rounded-md border px-3 py-2.5 text-xs ${selected ? 'border-primary/40 bg-secondary/50 text-slate-800' : disabled ? 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><input type="checkbox" name="roles" value={role} checked={selected} disabled={disabled} onChange={() => toggleRole(role)} className="size-4 accent-primary" /><span className="min-w-0 flex-1 font-medium">{role}{role === 'Admin' && <small className="ml-1.5 text-[9px] text-slate-400">Shared</small>}{!available && !selected && owner && <small className="mt-0.5 block truncate text-[9px] text-amber-700">Assigned to {owner.name}</small>}</span>{selected && <Icons.Check className="size-4 shrink-0 text-primary" />}</label> })}</div><p className="mt-2 text-[10px] leading-4 text-slate-500">Admin can have multiple users. Each other role can have one active or suspended owner. Deactivated accounts release their roles.</p></section>
+      <section className="mt-5"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-xs font-bold text-slate-800">Assign roles</h3><span className="text-[10px] text-slate-400">Select one or more; Admin must be the only role</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2">{roles.filter((role) => creatableRoles.includes(role) || selectedRoles.includes(role)).map((role) => { const available = availableRoles(role); const selected = selectedRoles.includes(role); const owner = accounts.find((candidate) => candidate.id !== account?.id && candidate.roles.includes(role) && candidate.status !== 'Deactivated'); const disabled = !creatableRoles.includes(role) || (selectedRoles.includes('Admin') && role !== 'Admin') || (!available && !selected) || (role === 'Super Admin' && selected && account?.status === 'Active' && account.roles.includes(role) && activeSuperAdmins.length === 1); return <label key={role} className={`flex min-h-11 items-center gap-2.5 rounded-md border px-3 py-2.5 text-xs ${selected ? 'border-primary/40 bg-secondary/50 text-slate-800' : disabled ? 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><input type="checkbox" name="roles" value={role} checked={selected} disabled={disabled} onChange={() => toggleRole(role)} className="size-4 accent-primary" /><span className="min-w-0 flex-1 font-medium">{role}{role === 'Admin' && <small className="ml-1.5 text-[9px] text-slate-400">Read-only</small>}{!available && !selected && owner && <small className="mt-0.5 block truncate text-[9px] text-amber-700">Assigned to {owner.name}</small>}</span>{selected && <Icons.Check className="size-4 shrink-0 text-primary" />}</label> })}</div><p className="mt-2 text-[10px] leading-4 text-slate-500">Only roles permitted for your account manager role can be assigned.</p></section>
       {message && <p role="alert" className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{message}</p>}
       <footer className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Cancel</button><button type="submit" disabled={saving} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{saving ? 'Saving…' : account ? 'Save changes' : 'Create account'}</button></footer>
     </form>

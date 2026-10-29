@@ -108,14 +108,18 @@ export function EmployeeDirectory({
   const [frequencyFilter, setFrequencyFilter] = useState("All frequencies");
   const [statusFilter, setStatusFilter] = useState("All statuses");
   const canManage = currentUser.roles.some((role) =>
-    ["Super Admin", "Admin", "Human Resource"].includes(role),
+    ["Super Admin", "Human Resource"].includes(role),
   );
   const canReadDisciplinary = currentUser.roles.some((role) =>
     ["Human Resource", "General Manager", "Super Admin"].includes(role),
   );
   const disciplinaryIndicatorsQuery =
     useDisciplinaryIndicators(canReadDisciplinary);
-  const canRead = canManage || currentUser.roles.includes("General Manager");
+  const canRead =
+    canManage ||
+    currentUser.roles.some((role) =>
+      ["Admin", "General Manager"].includes(role),
+    );
   const [legacyImport, setLegacyImport] = useState(() =>
     getLegacyEmployeeImport(),
   );

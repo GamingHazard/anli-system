@@ -1,6 +1,6 @@
 "use client";
 
-import { hasAnyDepartmentRole } from "@/lib/authorization";
+import { hasAnyDepartmentRole, hasDepartmentRole } from "@/lib/authorization";
 import { AttendancePage } from "@/features/attendance/legacy-screens";
 import { useWorkspace } from "@/features/workspace/workspace-context";
 
@@ -27,6 +27,7 @@ export default function AttendanceRoute() {
       employeesLoaded={employeesLoaded}
       employeeLoadError={employeeLoadError}
       onRetry={retryEmployees}
+      canEdit={hasDepartmentRole(currentUser.roles, "Human Resource")}
     />
   );
 }

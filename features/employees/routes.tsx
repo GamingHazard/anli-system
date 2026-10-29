@@ -98,7 +98,6 @@ export function EmployeeDetailsRoute() {
       state={state}
       updateState={updateState}
       canManage={hasAnyDepartmentRole(currentUser.roles, [
-        "Admin",
         "Human Resource",
       ])}
       canReadAdvances={hasAnyDepartmentRole(currentUser.roles, [

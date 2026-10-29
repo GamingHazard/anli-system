@@ -67,9 +67,14 @@ export function ModulePage({
     "Admin",
   ]);
   const assetCanRead = currentUser.roles.some((role) =>
-    ["Inventory Manager", "General Manager", "Super Admin"].includes(role),
+    ["Inventory Manager", "General Manager", "Admin", "Super Admin"].includes(role),
   );
-  const assetCanEdit = currentUser.roles.includes("Inventory Manager");
+  const assetCanEdit = currentUser.roles.some((role) =>
+    ["Inventory Manager", "Super Admin"].includes(role),
+  );
+  const isReadOnlyAdmin =
+    currentUser.roles.includes("Admin") &&
+    !currentUser.roles.includes("Super Admin");
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [toast, setToast] = useState("");
@@ -148,7 +153,9 @@ export function ModulePage({
         onViewPayrollRun={onViewPayrollRun}
       />
     );
-  if (active === "Raw Material Management") return <RawMaterialManagement />;
+  if (active === "Raw Material Management") {
+    return <RawMaterialManagement canEdit={assetCanEdit} />;
+  }
   if (active === "Orders")
     return (
       <OrdersManagement
@@ -549,7 +556,7 @@ export function ModulePage({
           >
             <Download className="size-4" /> Export CSV
           </button>
-          {![
+          {!isReadOnlyAdmin && ![
             "Auditing",
             "Analysis",
             "Reporting",

@@ -100,9 +100,9 @@ describe('expense-management', () => {
     expect(within(dialog).queryByLabelText('Tax type')).toBeNull()
   })
 
-  it('does not offer manual expense creation to a General Manager', () => {
+  it('offers expense actions to a General Manager across finance departments', () => {
     renderExpenses(['General Manager'])
-    expect(screen.queryByRole('button', { name: 'Record expense' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Record expense' })).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Expenses' })).not.toBeNull()
   })
 
