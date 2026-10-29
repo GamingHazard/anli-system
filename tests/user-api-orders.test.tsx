@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createOrder, getOrderDetails, listOrders } from '@/lib/user-api'
+import { createOrder, getOrderDetails, getPendingOrderCount, listOrders } from '@/lib/user-api'
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return {
@@ -52,6 +52,30 @@ describe('orders API client', () => {
 
     await expect(listOrders()).resolves.toEqual([])
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads the pending, non-archived order count without fetching the full order list', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      orders: [orderResponse],
+      total: 14,
+      page: 1,
+      limit: 1,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getPendingOrderCount()).resolves.toBe(14)
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/orders?status=Pending&archived=false&page=1&limit=1')
+  })
+
+  it('rejects invalid pending order count metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      orders: [],
+      total: -1,
+      page: 1,
+      limit: 1,
+    })))
+
+    await expect(getPendingOrderCount()).rejects.toThrow('The pending order count returned inconsistent pagination metadata.')
   })
 
   it('rejects pagination metadata that cannot supply the reported order total', async () => {

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Check, ChevronLeft, ChevronRight, CircleX, ClipboardList, Download, Eye, LoaderCircle, Plus, RefreshCw, Search, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, ChevronLeft, ChevronRight, CircleX, ClipboardList, Download, Ellipsis, Eye, LoaderCircle, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { createId, exportCsv, formatDate, money, packUnitLabel, type ErpState, type Order, type OrderStatus, type Sale, type SalePayment } from '@/lib/erp'
 import { archiveOrder, changeOrderStatus, confirmOrder, createOrder, fulfillOrder, getOrderDetails, importLegacyOrders, listOrders, listProductionProducts, recordOrderPayment, restoreOrder, updateOrder, type OrderInput, type OrderPaymentRecord, type ProductionProduct, type UserAccount } from '@/lib/user-api'
 import { importLegacyOrdersOnce } from '@/lib/order-migration'
@@ -17,7 +17,7 @@ type Props = {
 }
 
 type OrderPaymentDraft = { amount: string; date: string; method: SalePayment['method']; txnID: string; note: string }
-type DraftLine = { key: string; productId: string; packs: number; price: string; reason: string }
+type DraftLine = { key: string; productId: string; packs: string; price: string; reason: string }
 const methods: SalePayment['method'][] = ['Cash', 'Mobile Money', 'Bank Transfer', 'Check', 'Card']
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const message = (error: unknown) => error instanceof Error ? error.message : 'The request could not be completed.'
@@ -47,11 +47,11 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
   const [priorityReason, setPriorityReason] = useState(order?.priorityReason || '')
   const [notes, setNotes] = useState(order?.notes || '')
   const [lines, setLines] = useState<DraftLine[]>(order?.items.length
-    ? order.items.map((item, index) => ({ key: item.id || String(index), productId: item.productId || '', packs: item.quantity, price: String(item.unitPrice), reason: item.overrideReason || '' }))
-    : [{ key: createId('LINE'), productId: '', packs: 1, price: '', reason: '' }])
+    ? order.items.map((item, index) => ({ key: item.id || String(index), productId: item.productId || '', packs: String(item.quantity), price: String(item.unitPrice), reason: item.overrideReason || '' }))
+    : [{ key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])
   const idempotencyKey = useRef(createId('ORDER'))
   const canOverride = currentUser.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
-  const total = lines.reduce((sum, line) => sum + line.packs * Number(line.price || 0), 0)
+  const total = lines.reduce((sum, line) => sum + (Number(line.packs) || 0) * Number(line.price || 0), 0)
 
   useEffect(() => {
     let mounted = true
@@ -80,12 +80,14 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
       const items = lines.map((line) => {
         const product = products.find((item) => item.id === line.productId)
         if (!product) throw new Error('Select a valid active catalog product for every line.')
+        const packs = Number(line.packs)
+        if (!Number.isSafeInteger(packs) || packs < 1) throw new Error('Enter a positive whole-number quantity for every product.')
         const price = Number(line.price)
         if (!Number.isSafeInteger(price) || price < 1) throw new Error('Enter a positive whole-UGX price per pack.')
         if (price !== product.price && !line.reason.trim()) throw new Error(`Add a reason for overriding ${product.name}'s catalog price.`)
         return {
           productId: product.id,
-          packs: line.packs,
+          packs,
           ...(price !== product.price ? { pricePerPack: price, overrideReason: line.reason.trim() } : {}),
         }
       })
@@ -126,7 +128,7 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
         </div>
         {productsError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800">{productsError}</p>}
         <section>
-          <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-bold uppercase text-slate-500">Products</h3><button type="button" onClick={() => setLines((current) => [...current, { key: createId('LINE'), productId: '', packs: 1, price: '', reason: '' }])} className="text-xs font-semibold text-primary"><Plus className="mr-1 inline size-3" />Add line</button></div>
+          <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-bold uppercase text-slate-500">Products</h3><button type="button" onClick={() => setLines((current) => [...current, { key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])} className="text-xs font-semibold text-primary"><Plus className="mr-1 inline size-3" />Add line</button></div>
           <div className="space-y-3">{lines.map((line, index) => {
             const product = products.find((item) => item.id === line.productId)
             return <div key={line.key} className="grid gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_140px_36px]">
@@ -134,7 +136,7 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
                 const available = item.availablePacks ?? Math.max(0, item.balancePacks - (item.reservedPacks ?? 0))
                 return <option key={item.id} value={item.id}>{item.name} · {money(item.price || 0)}/{item.packType} · {available.toLocaleString()} {packUnitLabel(item.packType, available)} available</option>
               })}</select></label>
-              <label className="text-xs font-semibold">Quantity ({packUnitLabel(product?.packType)})<input type="number" required min="1" step="1" value={line.packs} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, packs: Math.max(1, Number(event.target.value)) } : draft))} className={field} /></label>
+              <label className="text-xs font-semibold">Quantity ({packUnitLabel(product?.packType)})<input type="number" required min="1" step="1" value={line.packs} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, packs: event.target.value } : draft))} className={field} /></label>
               <label className="text-xs font-semibold">Price per {packUnitLabel(product?.packType, 1)}<input type="number" required min="1" step="1" value={line.price} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, price: event.target.value } : draft))} className={field} /></label>
               <button type="button" aria-label={`Remove line ${index + 1}`} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((draft) => draft.key !== line.key))} className="self-end rounded p-2 text-slate-400 disabled:opacity-30"><X className="size-4" /></button>
               {product && Number(line.price) !== product.price && <label className="text-xs font-semibold sm:col-span-4">Price override reason<input required value={line.reason} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, reason: event.target.value } : draft))} disabled={!canOverride} className={field} />{!canOverride && <span className="text-rose-700">You cannot override catalog pricing.</span>}</label>}
@@ -182,8 +184,28 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
   const [paymentError, setPaymentError] = useState('')
   const [busyId, setBusyId] = useState('')
   const [error, setError] = useState('')
+  const [openActionMenuFor, setOpenActionMenuFor] = useState<string | null>(null)
+  const actionMenuRef = useRef<HTMLDivElement>(null)
   const canManage = currentUser.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
   const pageSize = 10
+
+  useEffect(() => {
+    if (!openActionMenuFor) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !actionMenuRef.current?.contains(event.target)) {
+        setOpenActionMenuFor(null)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenActionMenuFor(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openActionMenuFor])
 
   const load = async () => {
     setLoading(true)
@@ -365,18 +387,33 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
       </div>
       <div className="flex gap-1 border-b px-4">{(['open', 'completed', 'cancelled', 'archived'] as const).map((item) => <button key={item} type="button" aria-pressed={view === item} onClick={() => { setView(item); setPage(1); setStatusFilter('') }} className={`border-b-2 px-3 py-3 text-xs font-semibold capitalize ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500'}`}>{item === 'open' ? 'Open queue' : item}</button>)}</div>
       <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-slate-400"><tr>{['Reference / queue', 'Customer', 'Products', 'Requested', 'Total / paid', 'Priority / status', 'Actions'].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead><tbody>
-        {pageOrders.map((order, index) => <tr key={order.id} className="border-t border-slate-100 text-slate-600">
-          <td className="px-4 py-3 font-semibold text-slate-800">#{(page - 1) * pageSize + index + 1} · {order.reference}</td><td className="px-4 py-3">{order.customer}</td><td className="max-w-56 px-4 py-3">{order.items.map((item) => `${item.product} × ${item.quantity}`).join(', ')}</td><td className="px-4 py-3">{formatDate(order.requestedDate)}</td><td className="px-4 py-3">{money(order.total)}<span className="mt-1 block text-[10px] text-slate-400">Paid {money(order.paidAmount ?? 0)}</span></td><td className="px-4 py-3"><span className={order.priority === 'High' ? 'font-bold text-amber-700' : ''}>{order.priority}</span><span className="mt-1 block">{order.status}{order.reserved ? ' · Stock reserved' : ''}</span></td><td className="px-4 py-3"><div className="flex flex-wrap gap-1">
-            <button type="button" aria-label={`View ${order.reference}`} onClick={() => { void openDetails(order) }} className="rounded border p-1.5"><Eye className="size-3.5" /></button>
-            {canManage && order.status === 'Pending' && !order.legacyImported && <><button type="button" disabled={busyId === order.id} onClick={() => setEditor(order)} className="rounded border px-2 py-1">Edit</button><button type="button" disabled={busyId === order.id} onClick={() => void perform(order, () => confirmOrder(order.id))} className="rounded bg-emerald-50 px-2 py-1 text-emerald-800">Confirm</button></>}
-            {canManage && !order.legacyImported && order.status === 'Confirmed' && <button type="button" disabled={busyId === order.id} onClick={() => void updateStatus(order, 'In progress')} className="rounded border px-2 py-1">Start</button>}
-            {canManage && !order.legacyImported && order.status === 'In progress' && <button type="button" disabled={busyId === order.id} onClick={() => void updateStatus(order, 'Ready')} className="rounded border px-2 py-1">Mark ready</button>}
-            {canManage && !order.legacyImported && ['Pending', 'Confirmed', 'In progress', 'Ready'].includes(order.status) && <button type="button" disabled={busyId === order.id} onClick={() => void updateStatus(order, 'Cancelled', order.status === 'Ready' ? window.prompt('Reason for cancelling a ready order?') || '' : '')} className="rounded border p-1.5 text-rose-700" title="Cancel"><CircleX className="size-3.5" /></button>}
-            {canManage && order.status !== 'Cancelled' && order.status !== 'Completed' && !order.legacyImported && <button type="button" onClick={() => beginPayment(order)} className="rounded border px-2 py-1">Payment</button>}
-            {canManage && !order.legacyImported && order.status === 'Ready' && order.reserved && <button type="button" disabled={busyId === order.id} onClick={() => void fulfill(order)} className="rounded bg-primary px-2 py-1 text-primary-foreground">Fulfill</button>}
-            {canManage && ['Completed', 'Cancelled'].includes(order.status) && !order.archivedAt && <button type="button" onClick={() => void perform(order, async () => { const saved = await archiveOrder(order.id); return saved })} className="rounded border p-1.5" title="Archive"><Archive className="size-3.5" /></button>}
-            {canManage && order.archivedAt && <button type="button" onClick={() => void perform(order, () => restoreOrder(order.id))} className="rounded border p-1.5" title="Restore"><ArchiveRestore className="size-3.5" /></button>}
-          </div></td>
+        {pageOrders.map((order, index) => <tr key={order.id || order.orderNumber || order.reference || `order-${index}`} className="border-t border-slate-100 text-slate-600">
+          <td className="px-4 py-3 font-semibold text-slate-800">#{(page - 1) * pageSize + index + 1} · {order.reference}</td><td className="px-4 py-3">{order.customer}</td><td className="max-w-56 px-4 py-3">{order.items.map((item) => `${item.product} × ${item.quantity}`).join(', ')}</td><td className="px-4 py-3">{formatDate(order.requestedDate)}</td><td className="px-4 py-3">{money(order.total)}<span className="mt-1 block text-[10px] text-slate-400">Paid {money(order.paidAmount ?? 0)}</span></td><td className="px-4 py-3"><span className={order.priority === 'High' ? 'font-bold text-amber-700' : ''}>{order.priority}</span><span className="mt-1 block">{order.status}{order.reserved ? ' · Stock reserved' : ''}</span></td><td className="px-4 py-3">
+            <div ref={openActionMenuFor === order.id ? actionMenuRef : null} className="relative flex justify-end">
+              <button
+                type="button"
+                aria-label={`Actions for ${order.reference}`}
+                aria-haspopup="menu"
+                aria-expanded={openActionMenuFor === order.id}
+                onClick={() => setOpenActionMenuFor((current) => current === order.id ? null : order.id)}
+                className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+              ><Ellipsis className="size-4" /></button>
+              {openActionMenuFor === order.id && <div role="menu" aria-label={`Actions for ${order.reference}`} className="absolute right-0 top-full z-30 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+                <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); void openDetails(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">View details</button>
+                {canManage && order.status === 'Pending' && !order.legacyImported && <>
+                  <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); setEditor(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Edit order</button>
+                  <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void perform(order, () => confirmOrder(order.id)) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">Confirm</button>
+                </>}
+                {canManage && !order.legacyImported && order.status === 'Confirmed' && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'In progress') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Start order</button>}
+                {canManage && !order.legacyImported && order.status === 'In progress' && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Ready') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Mark ready</button>}
+                {canManage && !order.legacyImported && ['Pending', 'Confirmed', 'In progress', 'Ready'].includes(order.status) && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Cancelled', order.status === 'Ready' ? window.prompt('Reason for cancelling a ready order?') || '' : '') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">Cancel order</button>}
+                {canManage && order.status !== 'Cancelled' && order.status !== 'Completed' && !order.legacyImported && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); beginPayment(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Record payment</button>}
+                {canManage && !order.legacyImported && order.status === 'Ready' && order.reserved && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void fulfill(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-primary hover:bg-slate-50 disabled:opacity-50">Fulfill order</button>}
+                {canManage && ['Completed', 'Cancelled'].includes(order.status) && !order.archivedAt && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); void perform(order, async () => archiveOrder(order.id)) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Archive order</button>}
+                {canManage && order.archivedAt && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); void perform(order, () => restoreOrder(order.id)) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Restore order</button>}
+              </div>}
+            </div>
+          </td>
         </tr>)}
       </tbody></table>{!pageOrders.length && <div className="p-12 text-center text-sm text-slate-500"><ClipboardList className="mx-auto mb-2 size-5" />No orders match these filters.</div>}</div>
       <footer className="flex items-center justify-between border-t px-4 py-3 text-xs text-slate-500"><span>Showing {filtered.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, filtered.length)} of {filtered.length}</span><div className="flex items-center gap-2"><button type="button" aria-label="Previous orders page" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="rounded border p-1.5 disabled:opacity-40"><ChevronLeft className="size-4" /></button><span>Page {page} of {pageCount}</span><button type="button" aria-label="Next orders page" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} className="rounded border p-1.5 disabled:opacity-40"><ChevronRight className="size-4" /></button></div></footer>

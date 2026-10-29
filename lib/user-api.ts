@@ -114,6 +114,7 @@ export type AuditEvent = {
 export type AuditFilters = {
   eventType?: AuditEventType
   category?: string
+  categories?: string[]
   outcome?: AuditEvent['outcome']
   actorId?: string
   targetUserId?: string
@@ -1248,6 +1249,22 @@ export async function listOrders() {
     }
   } while (orders.length < total)
   return orders
+}
+
+export async function getPendingOrderCount() {
+  const search = new URLSearchParams({
+    status: 'Pending',
+    archived: 'false',
+    page: '1',
+    limit: '1',
+  })
+  const result = await request<{ orders: OrderApiRecord[]; total: number; page?: number; limit?: number }>(`/orders?${search}`)
+  if (!Array.isArray(result.orders) || !Number.isSafeInteger(result.total) || result.total < 0 ||
+    (result.page !== undefined && result.page !== 1) ||
+    (result.limit !== undefined && result.limit !== 1)) {
+    throw new Error('The pending order count returned inconsistent pagination metadata.')
+  }
+  return result.total
 }
 
 export async function getOrderDetails(id: string) {
@@ -2414,7 +2431,9 @@ export function listAuditEvents(filters: AuditFilters = {}) {
   const { targetUserId, ...query } = filters
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== '') params.set(key, String(value))
+    if (value !== undefined && value !== '') {
+      params.set(key, Array.isArray(value) ? value.join(',') : String(value))
+    }
   }
   const suffix = params.size ? `?${params.toString()}` : ''
   const path = targetUserId

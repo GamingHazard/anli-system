@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Download, Eye, Plus, Printer, Search, X } from 'lucide-react'
+import { ChevronDown, Download, Ellipsis, Eye, Plus, Printer, Search, X } from 'lucide-react'
 import { createId, exportCsv, formatDate, money, packUnitLabel, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
 import { ApiError, confirmOrder, createSale, getCreditCustomerStatement, getCreditReminderSettings, listOrders, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
 
@@ -21,7 +21,7 @@ type Props = {
   onRetryCustomers: () => void
 }
 
-type DraftLine = { key: string; productId: string; packs: number; price: string; reason: string }
+type DraftLine = { key: string; productId: string; packs: string; price: string; reason: string }
 type SalePaymentDraft = { amount: number; date: string; method: SalePayment['method']; txnID: string; note: string }
 type SalesPeriod = 'today' | 'week' | 'month'
 
@@ -316,7 +316,7 @@ function SaleForm({
   const [dueDate, setDueDate] = useState('')
   const [method, setMethod] = useState<SalePayment['method']>('Cash')
   const [paymentAmount, setPaymentAmount] = useState(0)
-  const [lines, setLines] = useState<DraftLine[]>([{ key: createId('LINE'), productId: '', packs: 1, price: '', reason: '' }])
+  const [lines, setLines] = useState<DraftLine[]>([{ key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])
   const [error, setError] = useState('')
   const [salePending, setSalePending] = useState(false)
   const idempotencyKey = useRef(createId('SALE'))
@@ -332,7 +332,7 @@ function SaleForm({
       : 0
   }
   const requestedPacksByProduct = lines.reduce((totals, line) => {
-    if (line.productId) totals.set(line.productId, (totals.get(line.productId) ?? 0) + line.packs)
+    if (line.productId) totals.set(line.productId, (totals.get(line.productId) ?? 0) + (Number(line.packs) || 0))
     return totals
   }, new Map<string, number>())
   const hasInsufficientStock = [...requestedPacksByProduct].some(([productId, packs]) =>
@@ -349,7 +349,7 @@ function SaleForm({
     customer.name.toLowerCase().includes(customerSearch.trim().toLowerCase()),
   )
   const canOverridePrice = user.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
-  const total = lines.reduce((sumLines, line) => sumLines + line.packs * Number(line.price || 0), 0)
+  const total = lines.reduce((sumLines, line) => sumLines + (Number(line.packs) || 0) * Number(line.price || 0), 0)
   const todayValue = today()
 
   useEffect(() => {
@@ -416,7 +416,7 @@ function SaleForm({
   const changeTermTotal = (nextLines: DraftLine[]) => {
     setLines(nextLines)
     if (terms === 'Paid now' || guest) {
-      setPaymentAmount(nextLines.reduce((value, line) => value + line.packs * Number(line.price || 0), 0))
+      setPaymentAmount(nextLines.reduce((value, line) => value + (Number(line.packs) || 0) * Number(line.price || 0), 0))
     }
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -430,6 +430,8 @@ function SaleForm({
       if (!hasSellableStock) throw new Error('There is no sellable stock available for this sale.')
       if (hasInsufficientStock) throw new Error('The requested quantity exceeds available stock. Reduce the quantity or choose another product.')
       const saleLines = lines.map((line) => {
+        const packs = Number(line.packs)
+        if (!Number.isSafeInteger(packs) || packs < 1) throw new Error('Enter a positive whole-number quantity for every product.')
         const product = activeProducts.find((item) => item.id === line.productId)
         if (!product) throw new Error('Choose an active priced product with valid pack details for every line.')
         const catalogPrice = product.price ?? 0
@@ -438,7 +440,7 @@ function SaleForm({
         if (selectedPrice !== catalogPrice && !line.reason.trim()) throw new Error(`Provide a reason for the ${product.name} price override.`)
         return {
           productId: product.id,
-          packs: line.packs,
+          packs,
           ...(selectedPrice !== catalogPrice ? { pricePerPack: selectedPrice, overrideReason: line.reason.trim() } : {}),
         }
       })
@@ -528,7 +530,7 @@ function SaleForm({
           {!customersAvailable && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Saved customer profiles are unavailable. You can proceed with a fully paid walk-in sale. <button type="button" onClick={onRetryCustomers} className="font-semibold underline">Retry customer loading</button></p>}
 
           <section>
-            <div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Products</h3><button type="button" disabled={salePending} onClick={() => changeTermTotal([...lines, { key: createId('LINE'), productId: '', packs: 1, price: '', reason: '' }])} className="inline-flex items-center gap-1 text-xs font-semibold text-primary"><Plus className="size-3.5" /> Add product</button></div>
+            <div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Products</h3><button type="button" disabled={salePending} onClick={() => changeTermTotal([...lines, { key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])} className="inline-flex items-center gap-1 text-xs font-semibold text-primary"><Plus className="size-3.5" /> Add product</button></div>
             {productsQuery.isLoading && <p role="status" className="text-xs text-slate-500">Loading product prices…</p>}
             {productsQuery.isError && <p role="alert" className="text-xs text-rose-700">{errorMessage(productsQuery.error)} <button type="button" onClick={() => void productsQuery.refetch()} className="font-semibold underline">Retry</button></p>}
             {!productsQuery.isLoading && activeProducts.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">No active products have a catalog price and valid outer-pack size. Configure product price and packaging in Production Management before recording sales.</p>}
@@ -537,7 +539,7 @@ function SaleForm({
               const product = activeProducts.find((item) => item.id === line.productId)
               const availablePacks = product ? availablePacksFor(product.id) : 0
               const otherRequestedPacks = lines.reduce((totalPacks, item) =>
-                item.productId === line.productId && item.key !== line.key ? totalPacks + item.packs : totalPacks,
+                item.productId === line.productId && item.key !== line.key ? totalPacks + (Number(item.packs) || 0) : totalPacks,
               0)
               const lineStockExceeded = Boolean(product && (requestedPacksByProduct.get(product.id) ?? 0) > availablePacks)
               const catalogPrice = product?.price ?? 0
@@ -553,12 +555,12 @@ function SaleForm({
                   </select>
                   {product && <span className="mt-1 block text-[10px] font-normal text-slate-400">Available: {availablePacks.toLocaleString()} {packUnitLabel(product.packType, availablePacks)} · {product.loosePieces ?? 0} loose pieces not sellable</span>}
                 </label>
-                <label className="text-xs font-semibold text-slate-600">Quantity ({packUnitLabel(product?.packType)})<input required type="number" min="1" max={Math.max(1, availablePacks - otherRequestedPacks)} step="1" value={line.packs} disabled={salePending || !product || availablePacks === 0} onChange={(event) => changeTermTotal(lines.map((item) => item.key === line.key ? { ...item, packs: Math.max(1, Number(event.target.value)) } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
+                <label className="text-xs font-semibold text-slate-600">Quantity ({packUnitLabel(product?.packType)})<input required type="number" min="1" max={Math.max(1, availablePacks - otherRequestedPacks)} step="1" value={line.packs} disabled={salePending || !product || availablePacks === 0} onChange={(event) => changeTermTotal(lines.map((item) => item.key === line.key ? { ...item, packs: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
                 <label className="text-xs font-semibold text-slate-600">Price / {packUnitLabel(product?.packType, 1)} (UGX)<input required type="number" min="1" step="1" value={line.price} disabled={salePending || !canOverridePrice} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, price: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
                 <button type="button" aria-label={`Remove product ${index + 1}`} disabled={salePending || lines.length === 1} onClick={() => changeTermTotal(lines.filter((item) => item.key !== line.key))} className="grid size-9 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X className="size-4" /></button>
                 {overridden && <label className="text-xs font-semibold text-amber-800 sm:col-span-4">Reason for price override<input required value={line.reason} disabled={salePending} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, reason: event.target.value } : item))} maxLength={500} className="mt-1.5 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm" /></label>}
                 {lineStockExceeded && <p role="alert" className="text-xs font-medium text-rose-700 sm:col-span-4">Requested quantity exceeds available stock ({availablePacks} {packUnitLabel(product?.packType, availablePacks)} available).</p>}
-                <div className="text-right text-xs text-slate-500 sm:col-span-4">Line total: <strong className="text-slate-800">{money(line.packs * Number(line.price || 0))}</strong></div>
+                <div className="text-right text-xs text-slate-500 sm:col-span-4">Line total: <strong className="text-slate-800">{money((Number(line.packs) || 0) * Number(line.price || 0))}</strong></div>
               </div>
             })}</div>
             <div className="mt-3 flex justify-end border-t border-slate-100 pt-3 text-sm font-bold">Sale total: <span className="ml-2 text-primary">{money(total)}</span></div>
@@ -600,6 +602,7 @@ export default function SalesManagementPage({
   const [search, setSearch] = useState('')
   const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>('today')
   const [salesPeriodMenuOpen, setSalesPeriodMenuOpen] = useState(false)
+  const [creditActionMenuFor, setCreditActionMenuFor] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null)
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
@@ -620,6 +623,7 @@ export default function SalesManagementPage({
   const [pendingOrderMessage, setPendingOrderMessage] = useState('')
   const queryClient = useQueryClient()
   const salesPeriodMenuRef = useRef<HTMLDivElement>(null)
+  const creditActionMenuRef = useRef<HTMLDivElement>(null)
   const [paymentDraft, setPaymentDraft] = useState<SalePaymentDraft>({ amount: 0, date: today(), method: 'Cash', txnID: '', note: '' })
   const paymentKey = useRef({ saleId: '', value: createId('PAY') })
   useEffect(() => {
@@ -637,6 +641,23 @@ export default function SalesManagementPage({
       document.removeEventListener('keydown', closeOnEscape)
     }
   }, [salesPeriodMenuOpen])
+  useEffect(() => {
+    if (!creditActionMenuFor) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !creditActionMenuRef.current?.contains(event.target)) {
+        setCreditActionMenuFor(null)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCreditActionMenuFor(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [creditActionMenuFor])
   const canCreate = currentUser.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
   const pendingOrdersQuery = useQuery({
     queryKey: ['sales-pending-orders'],
@@ -645,7 +666,10 @@ export default function SalesManagementPage({
   })
   const pendingOrders = (pendingOrdersQuery.data ?? [])
     .filter((order) => order.status === 'Pending' && !order.archivedAt && !order.legacyImported)
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .sort((left, right) => {
+      if (left.priority !== right.priority) return left.priority === 'High' ? -1 : 1
+      return left.createdAt.localeCompare(right.createdAt)
+    })
   const confirmOrderMutation = useMutation({
     mutationFn: (orderId: string) => confirmOrder(orderId),
     onSuccess: async (order) => {
@@ -853,9 +877,9 @@ export default function SalesManagementPage({
           {pendingOrdersQuery.isLoading ? <p role="status" className="mt-2 text-[10px] text-slate-400">Loading pending orders…</p>
             : pendingOrdersQuery.isError ? <div className="mt-2"><p role="alert" className="text-[10px] text-rose-700">Pending orders could not be loaded.</p><button type="button" onClick={() => { void pendingOrdersQuery.refetch() }} className="mt-1 text-[10px] font-semibold text-primary hover:underline">Retry</button></div>
               : <><p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{pendingOrders.length} <span className="text-xs font-medium text-slate-500">{pendingOrders.length === 1 ? 'order' : 'orders'}</span></p>
-                <ul aria-label="Latest pending orders" className="mt-2 max-h-28 space-y-2 overflow-y-auto border-t border-slate-100 pt-2">
-                  {pendingOrders.length ? pendingOrders.slice(0, 3).map((order) => <li key={order.id} className="flex items-center justify-between gap-2 text-[10px]">
-                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-700">{order.customer}</span><span className="block truncate text-slate-400">{order.reference} · requested {formatDate(order.requestedDate)}</span></span>
+                <ul aria-label="Pending order requiring attention" className="mt-2 max-h-28 space-y-2 overflow-y-auto border-t border-slate-100 pt-2">
+                  {pendingOrders.length ? pendingOrders.slice(0, 1).map((order) => <li key={order.id} className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="min-w-0"><span className="block truncate font-semibold text-slate-700">{order.customer}</span><span className="block truncate text-slate-400">{order.reference} · requested {formatDate(order.requestedDate)}{order.priority === 'High' ? ' · High priority' : ''}</span></span>
                     {canCreate && <button type="button" disabled={confirmOrderMutation.isPending} onClick={() => { setPendingOrderMessage(''); confirmOrderMutation.mutate(order.id) }} className="shrink-0 rounded-md bg-emerald-50 px-2 py-1.5 font-semibold text-emerald-800 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-50">{confirmOrderMutation.isPending && confirmOrderMutation.variables === order.id ? 'Confirming…' : 'Confirm'}</button>}
                   </li>) : <li className="py-1 text-[10px] text-slate-400">No orders are awaiting confirmation.</li>}
                 </ul>
@@ -892,7 +916,26 @@ export default function SalesManagementPage({
             const paid = paidAmountForSale(sale.id, state.payments)
             const balance = Math.max(0, sale.total - paid)
             const productNames = sale.lines?.map((line) => `${line.productName} × ${line.packs} ${line.packType}`).join(', ') || sale.product
-            return <tr key={sale.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3 font-semibold text-slate-800">{sale.receiptNumber || sale.reference}</td><td className="px-4 py-3">{formatDate(sale.date)}</td>{mode === 'credit' && <td className={`px-4 py-3 ${sale.dueDate && sale.dueDate < todayDate && balance > 0 ? 'font-semibold text-rose-700' : ''}`}>{sale.dueDate ? formatDate(sale.dueDate) : 'Needs review'}</td>}<td className="px-4 py-3">{sale.customer}</td>{mode === 'credit' && <td className="px-4 py-3">{salesOwners.data?.find((owner) => owner.id === sale.assignedTo)?.name || 'Unassigned'}</td>}<td className="max-w-72 truncate px-4 py-3" title={productNames}>{productNames}</td><td className="px-4 py-3 font-semibold">{money(sale.total)}</td><td className="px-4 py-3">{money(paid)} / {money(balance)}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${balance ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{paymentStateForSale(sale, state.payments)}</span></td><td className="px-4 py-3"><div className="flex gap-1"><button type="button" aria-label={`View receipt ${sale.reference}`} onClick={() => setReceiptSale(sale)} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1.5"><Eye className="size-3.5" /> Receipt</button>            {mode === 'credit' && (sale.creditNeedsReview || !sale.dueDate || !sale.assignedTo) && <button type="button" onClick={() => { setReviewSale(sale); setReviewDueDate(sale.dueDate || ''); setReviewOwner(sale.assignedTo || ''); setReviewCustomerId(sale.customerId || ''); setReviewError('') }} className="rounded border border-slate-200 px-2 py-1.5">Review</button>}{balance > 0 && <button type="button" onClick={() => { if (paymentKey.current.saleId !== sale.id) paymentKey.current = { saleId: sale.id, value: createId('PAY') }; setPaymentSale(sale); setPaymentDraft({ amount: balance, date: today(), method: 'Cash', txnID: '', note: '' }); setPaymentError('') }} className="rounded border border-slate-200 px-2 py-1.5">Record payment</button>}</div></td></tr>
+            return <tr key={sale.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3 font-semibold text-slate-800">{sale.receiptNumber || sale.reference}</td><td className="px-4 py-3">{formatDate(sale.date)}</td>{mode === 'credit' && <td className={`px-4 py-3 ${sale.dueDate && sale.dueDate < todayDate && balance > 0 ? 'font-semibold text-rose-700' : ''}`}>{sale.dueDate ? formatDate(sale.dueDate) : 'Needs review'}</td>}<td className="px-4 py-3">{sale.customer}</td>{mode === 'credit' && <td className="px-4 py-3">{salesOwners.data?.find((owner) => owner.id === sale.assignedTo)?.name || 'Unassigned'}</td>}<td className="max-w-72 truncate px-4 py-3" title={productNames}>{productNames}</td><td className="px-4 py-3 font-semibold">{money(sale.total)}</td><td className="px-4 py-3">{money(paid)} / {money(balance)}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${balance ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{paymentStateForSale(sale, state.payments)}</span></td><td className="px-4 py-3">
+              {mode === 'credit' ? <div ref={creditActionMenuFor === sale.id ? creditActionMenuRef : null} className="relative flex justify-end">
+                <button
+                  type="button"
+                  aria-label={`Actions for credit sale ${sale.reference}`}
+                  aria-haspopup="menu"
+                  aria-expanded={creditActionMenuFor === sale.id}
+                  onClick={() => setCreditActionMenuFor((current) => current === sale.id ? null : sale.id)}
+                  className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                ><Ellipsis className="size-4" /></button>
+                {creditActionMenuFor === sale.id && <div role="menu" aria-label={`Actions for credit sale ${sale.reference}`} className="absolute right-0 top-full z-30 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+                  <button type="button" role="menuitem" onClick={() => { setCreditActionMenuFor(null); setReceiptSale(sale) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">View receipt</button>
+                  {(sale.creditNeedsReview || !sale.dueDate || !sale.assignedTo) && <button type="button" role="menuitem" onClick={() => { setCreditActionMenuFor(null); setReviewSale(sale); setReviewDueDate(sale.dueDate || ''); setReviewOwner(sale.assignedTo || ''); setReviewCustomerId(sale.customerId || ''); setReviewError('') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Review credit details</button>}
+                  {balance > 0 && <button type="button" role="menuitem" onClick={() => { setCreditActionMenuFor(null); if (paymentKey.current.saleId !== sale.id) paymentKey.current = { saleId: sale.id, value: createId('PAY') }; setPaymentSale(sale); setPaymentDraft({ amount: balance, date: today(), method: 'Cash', txnID: '', note: '' }); setPaymentError('') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Record payment</button>}
+                </div>}
+              </div> : <div className="flex gap-1">
+                <button type="button" aria-label={`View receipt ${sale.reference}`} onClick={() => setReceiptSale(sale)} className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1.5"><Eye className="size-3.5" /> Receipt</button>
+                {balance > 0 && <button type="button" onClick={() => { if (paymentKey.current.saleId !== sale.id) paymentKey.current = { saleId: sale.id, value: createId('PAY') }; setPaymentSale(sale); setPaymentDraft({ amount: balance, date: today(), method: 'Cash', txnID: '', note: '' }); setPaymentError('') }} className="rounded border border-slate-200 px-2 py-1.5">Record payment</button>}
+              </div>}
+            </td></tr>
           })}
         </tbody></table></div>
         {!visibleSales.length && <div className="py-14 text-center text-sm text-slate-500">No sales found.</div>}

@@ -23,6 +23,29 @@ type AppliedFilters = {
   to: string
 }
 
+type AuditTabId =
+  | 'all'
+  | 'sales-credit'
+  | 'orders'
+  | 'expenses'
+  | 'inventory-production'
+  | 'people-payroll'
+  | 'security-accounts'
+  | 'customers-assets'
+  | 'system'
+
+const AUDIT_TAB_GROUPS: { id: AuditTabId; label: string; categories: string[] | null }[] = [
+  { id: 'all', label: 'All activity', categories: null },
+  { id: 'sales-credit', label: 'Sales & credit', categories: ['sale', 'credit', 'receipt'] },
+  { id: 'orders', label: 'Orders', categories: ['order'] },
+  { id: 'expenses', label: 'Expenses', categories: ['expense'] },
+  { id: 'inventory-production', label: 'Inventory & production', categories: ['inventory', 'production'] },
+  { id: 'people-payroll', label: 'People & payroll', categories: ['employee', 'attendance', 'leave', 'disciplinary', 'salary_advance', 'payroll'] },
+  { id: 'security-accounts', label: 'Security & accounts', categories: ['auth', 'account', 'session', 'security'] },
+  { id: 'customers-assets', label: 'Customers & assets', categories: ['customer', 'asset'] },
+  { id: 'system', label: 'System', categories: [] },
+]
+
 const emptyFilters: AppliedFilters = {
   eventType: '',
   category: '',
@@ -67,6 +90,7 @@ export default function AuditWorkspace({
   const [filterLoadError, setFilterLoadError] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
   const [applied, setApplied] = useState(emptyFilters)
+  const [activeTab, setActiveTab] = useState<AuditTabId>('all')
   const [events, setEvents] = useState<AuditEvent[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -80,6 +104,19 @@ export default function AuditWorkspace({
     () => new Map(accounts.map((account) => [account.id, account.name])),
     [accounts],
   )
+  const tabs = useMemo(() => {
+    const assignedCategories = new Set(
+      AUDIT_TAB_GROUPS.flatMap((tab) => tab.categories || []),
+    )
+    const systemCategories = categories.length
+      ? categories.filter((category) => !assignedCategories.has(category))
+      : ['company', 'session', 'data']
+    return AUDIT_TAB_GROUPS.map((tab) => (
+      tab.id === 'system' ? { ...tab, categories: systemCategories } : tab
+    ))
+  }, [categories])
+  const selectedTab = tabs.find((tab) => tab.id === activeTab) || tabs[0]!
+  const activeTabCategories = selectedTab.id === 'all' ? undefined : selectedTab.categories || undefined
 
   const loadFilterOptions = useCallback(async () => {
     if (!isSuperAdmin || targetUserId) return
@@ -119,6 +156,7 @@ export default function AuditWorkspace({
     listAuditEvents({
       eventType: applied.eventType || undefined,
       category: applied.category || undefined,
+      categories: activeTabCategories,
       outcome: (applied.outcome || undefined) as AuditEvent['outcome'] | undefined,
       actorId: applied.actorId || undefined,
       targetUserId: targetUserId || applied.targetId || undefined,
@@ -137,7 +175,7 @@ export default function AuditWorkspace({
       if (mounted) setLoading(false)
     })
     return () => { mounted = false }
-  }, [applied, isSuperAdmin, refreshVersion, targetUserId])
+  }, [activeTabCategories, applied, isSuperAdmin, refreshVersion, targetUserId])
 
   const loadMore = async () => {
     if (!cursor || loadingMore) return
@@ -147,6 +185,7 @@ export default function AuditWorkspace({
       const result = await listAuditEvents({
         eventType: applied.eventType || undefined,
         category: applied.category || undefined,
+        categories: activeTabCategories,
         outcome: (applied.outcome || undefined) as AuditEvent['outcome'] | undefined,
         actorId: applied.actorId || undefined,
         targetUserId: targetUserId || applied.targetId || undefined,
@@ -175,6 +214,31 @@ export default function AuditWorkspace({
     event.preventDefault()
     setApplied({ ...filters })
   }
+  const selectTab = (tabId: AuditTabId) => {
+    setActiveTab(tabId)
+    setFilters((current) => ({ ...current, category: '', eventType: '' }))
+    setApplied((current) => ({ ...current, category: '', eventType: '' }))
+  }
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab)
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? tabs.length - 1
+        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+    const nextTab = tabs[nextIndex]!
+    selectTab(nextTab.id)
+    document.getElementById(`audit-tab-${nextTab.id}`)?.focus()
+  }
+  const visibleCategories = categories.filter(
+    (category) => !activeTabCategories || activeTabCategories.includes(category),
+  )
+  const visibleEventTypes = eventTypes.filter((type) => (
+    (!activeTabCategories || activeTabCategories.includes(type.split('.')[0] || '')) &&
+    (!filters.category || type.startsWith(`${filters.category}.`))
+  ))
   const activeFilters = [
     applied.eventType && { key: 'eventType' as const, label: label(applied.eventType) },
     applied.category && { key: 'category' as const, label: `Area: ${label(applied.category)}` },
@@ -216,6 +280,25 @@ export default function AuditWorkspace({
         </header>
       )}
 
+      <div role="tablist" aria-label="Audit activity areas" className="mb-4 flex overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            id={`audit-tab-${tab.id}`}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls="audit-tabpanel"
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            onClick={() => selectTab(tab.id)}
+            onKeyDown={handleTabKeyDown}
+            className={`shrink-0 border-b-2 px-4 py-3 text-xs font-semibold transition ${activeTab === tab.id ? 'border-primary bg-violet-50/50 text-primary' : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {!targetUserId && (
         <form onSubmit={applyFilters} className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
@@ -242,14 +325,14 @@ export default function AuditWorkspace({
                 className={fieldClass}
               >
                 <option value="">All areas</option>
-                {categories.map((category) => <option key={category} value={category}>{label(category)}</option>)}
+                {visibleCategories.map((category) => <option key={category} value={category}>{label(category)}</option>)}
               </select>
             </label>
             <label className="grid gap-1.5 text-xs font-medium text-slate-600">
               Activity
               <select aria-label="Filter by activity" value={filters.eventType} onChange={(event) => setFilter('eventType', event.target.value)} className={fieldClass}>
                 <option value="">All activities</option>
-                {eventTypes.filter((type) => !filters.category || type.startsWith(`${filters.category}.`)).map((type) => <option key={type} value={type}>{label(filters.category ? type.slice(type.indexOf('.') + 1) : type)}</option>)}
+                {visibleEventTypes.map((type) => <option key={type} value={type}>{label(filters.category ? type.slice(type.indexOf('.') + 1) : type)}</option>)}
               </select>
             </label>
             <label className="grid gap-1.5 text-xs font-medium text-slate-600">
@@ -315,10 +398,10 @@ export default function AuditWorkspace({
         </form>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div id="audit-tabpanel" role="tabpanel" aria-labelledby={`audit-tab-${activeTab}`} tabIndex={0} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">{targetUserId ? 'Account activity' : 'Recorded events'}</h2>
+            <h2 className="text-sm font-semibold text-slate-900">{targetUserId ? 'Account activity' : selectedTab.label}</h2>
             <p className="mt-0.5 text-xs text-slate-500">Newest activity appears first · times shown in your local timezone</p>
           </div>
           {!targetUserId && <span className="text-xs text-slate-500">{events.length} loaded</span>}

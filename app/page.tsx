@@ -62,6 +62,10 @@ import {
 } from "@/lib/attendance-queries";
 import { useLeaveRequests } from "@/lib/leave-queries";
 import {
+  approvalInboxQueryKeys,
+  useApprovalInbox,
+} from "@/lib/approval-inbox-queries";
+import {
   useDisciplinaryCases,
   useDisciplinaryIndicators,
 } from "@/lib/disciplinary-queries";
@@ -127,6 +131,7 @@ import {
   getCurrentSession,
   getEmployee,
   getEmployeeDocumentDownload,
+  getPendingOrderCount,
   getPublicCompanyBrand,
   listSales,
   reportSessionActivity,
@@ -2564,6 +2569,17 @@ function Sidebar({
   canReadCustomers: boolean;
   canReadSales: boolean;
 }) {
+  const queryClient = useQueryClient();
+  const approvalInboxQuery = useApprovalInbox();
+  const pendingOrdersQuery = useQuery({
+    queryKey: ["orders", "pending-count"],
+    queryFn: getPendingOrderCount,
+    enabled: canReadSales,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+  const approvalInProgressCount = approvalInboxQuery.data?.counts.inProgress;
+  const pendingOrderCount = pendingOrdersQuery.data;
   const visibleNavGroups = navGroups
     .map((group) => ({
       ...group,
@@ -2637,19 +2653,23 @@ function Sidebar({
                 return (
                   <button
                     key={item.label}
-                    title={
-                      collapsed && comingSoon
-                        ? `${item.label} (coming soon!)`
-                        : collapsed
-                          ? item.label
-                          : undefined
-                    }
+                    title={collapsed
+                      ? `${item.label}${comingSoon ? " (coming soon!)" : ""}${item.label === "Approvals" && approvalInProgressCount !== undefined ? ` · ${approvalInProgressCount} in progress` : ""}${item.label === "Orders" && pendingOrderCount !== undefined ? ` · ${pendingOrderCount} pending` : ""}`
+                      : undefined}
                     aria-label={
-                      comingSoon ? `${item.label} (coming soon!)` : item.label
+                      `${comingSoon ? `${item.label} (coming soon!)` : item.label}${item.label === "Approvals" && approvalInProgressCount !== undefined ? `, ${approvalInProgressCount} in progress` : item.label === "Approvals" && approvalInboxQuery.isError ? ", in-progress count unavailable" : ""}${item.label === "Orders" && pendingOrderCount !== undefined ? `, ${pendingOrderCount} pending` : item.label === "Orders" && pendingOrdersQuery.isError ? ", pending count unavailable" : ""}`
                     }
                     disabled={comingSoon}
-                    onClick={() => setActive(item.label)}
-                    className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${comingSoon ? "cursor-not-allowed text-slate-400" : active === item.label ? "bg-[#f1eafd] text-[#6d28d9]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
+                    onClick={() => {
+                      if (item.label === "Approvals") {
+                        void queryClient.invalidateQueries({ queryKey: approvalInboxQueryKeys.all });
+                      }
+                      if (item.label === "Orders") {
+                        void queryClient.invalidateQueries({ queryKey: ["orders", "pending-count"] });
+                      }
+                      setActive(item.label);
+                    }}
+                    className={`group relative mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition ${comingSoon ? "cursor-not-allowed text-slate-400" : active === item.label ? "bg-[#f1eafd] text-[#6d28d9]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}
                   >
                     <Icon
                       className={`size-[17px] shrink-0 ${active === item.label ? "text-[#6d28d9]" : "text-slate-400 group-hover:text-slate-600"}`}
@@ -2662,6 +2682,20 @@ function Sidebar({
                             (coming soon!)
                           </span>
                         )}
+                      </span>
+                    )}
+                    {(item.label === "Approvals" || item.label === "Orders" && canReadSales) && (
+                      <span
+                        aria-hidden="true"
+                        className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${active === item.label ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-600"} ${collapsed ? "absolute right-1 top-0.5 min-w-4 px-1 text-center text-[9px]" : ""}`}
+                      >
+                        {item.label === "Approvals"
+                          ? approvalInProgressCount === undefined
+                            ? approvalInboxQuery.isError ? "!" : "…"
+                            : approvalInProgressCount > 99 ? "99+" : approvalInProgressCount
+                          : pendingOrderCount === undefined
+                            ? pendingOrdersQuery.isError ? "!" : "…"
+                            : pendingOrderCount > 99 ? "99+" : pendingOrderCount}
                       </span>
                     )}
                     {!collapsed && active === item.label && (

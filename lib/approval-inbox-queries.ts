@@ -22,6 +22,7 @@ export function useApprovalInbox() {
     queryKey: approvalInboxQueryKeys.inbox,
     queryFn: getApprovalInbox,
     staleTime: 15_000,
+    refetchInterval: 30_000,
   })
 }
 

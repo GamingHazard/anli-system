@@ -117,6 +117,49 @@ describe('audit workspace', () => {
     })
   })
 
+  it('filters grouped tabs and keeps the selected categories when loading another page', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/users')) return Promise.resolve(jsonResponse({ users: [] }))
+      if (url.includes('/audit/event-types')) {
+        return Promise.resolve(jsonResponse({
+          eventTypes: ['sale.created', 'credit.sale_updated', 'receipt.archived', 'data.read.succeeded', 'order.created'],
+          resourceTypes: ['sale'],
+          categories: ['sale', 'credit', 'receipt', 'data', 'order'],
+        }))
+      }
+      if (url.includes('/audit?')) {
+        return Promise.resolve(jsonResponse({
+          events: [],
+          nextCursor: url.includes('cursor=') ? null : 'next-page',
+        }))
+      }
+      return Promise.resolve(jsonResponse({}, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AuditWorkspace currentUser={currentUser} />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Sales & credit' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => (
+        String(input).includes('categories=sale%2Ccredit%2Creceipt')
+      ))).toBe(true)
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = String(input)
+        return url.includes('categories=sale%2Ccredit%2Creceipt') && url.includes('cursor=next-page')
+      })).toBe(true)
+    })
+
+    fireEvent.click(screen.getByRole('tab', { name: 'System' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes('categories=data'))).toBe(true)
+    })
+  })
+
   it('does not request the global feed for a non-Super Admin', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
