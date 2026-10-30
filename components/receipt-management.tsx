@@ -33,11 +33,11 @@ function receiptHtml(receipt: ManagedReceipt) {
   const company = receipt.company || {}
   const lines = receipt.kind === 'sale'
     ? (receipt.lines.length
-      ? receipt.lines.map((line) => `<tr><td>${escapeHtml(line.productName)}</td><td>${line.packs} ${escapeHtml(line.packType)}</td><td>${money(line.lineTotal)}</td></tr>`).join('')
+      ? receipt.lines.map((line) => `<tr><td>${escapeHtml(line.productName)}</td><td>${line.packs}${(line.bonusPacks ?? 0) > 0 ? ` + ${line.bonusPacks} bonus` : ''} ${escapeHtml(line.packType)}</td><td>${money(line.lineTotal)}</td></tr>`).join('')
       : `<tr><td>Sale transaction</td><td>—</td><td>${money(receipt.amount)}</td></tr>`)
     : `<tr><td>Credit payment${receipt.saleReceiptNumber ? ` for ${escapeHtml(receipt.saleReceiptNumber)}` : ''}</td><td>${escapeHtml(receipt.payment?.method)}</td><td>${money(receipt.amount)}</td></tr>`
   const summary = receipt.kind === 'sale'
-    ? `<p>Total: <strong>${money(receipt.total ?? receipt.amount)}</strong></p><p>Paid: ${money(receipt.paidAmount ?? 0)} &nbsp; Balance: ${money(receipt.balance ?? 0)}</p>${(receipt.payments || []).map((payment) => `<p>${escapeHtml(formatDate(payment.date))} · ${escapeHtml(payment.method)}: ${money(payment.amount)}</p>`).join('')}`
+    ? `<p>Total: <strong>${money(receipt.total ?? receipt.amount)}</strong></p>${receipt.bonusSnapshot?.bonusBoxes ? `<section style="margin:12px 0;padding:10px;border:1px solid #86efac;background:#f0fdf4;border-radius:8px"><strong>BONUS TAKEN</strong><br>${receipt.bonusSnapshot.bonusBoxes} free boxes</section>` : ''}${receipt.bonusDisabledReason ? `<p>Bonus disabled: ${escapeHtml(receipt.bonusDisabledReason)}</p>` : ''}<p>Paid: ${money(receipt.paidAmount ?? 0)} &nbsp; Balance: ${money(receipt.balance ?? 0)}</p>${(receipt.payments || []).map((payment) => `<p>${escapeHtml(formatDate(payment.date))} · ${escapeHtml(payment.method)}: ${money(payment.amount)}</p>`).join('')}`
     : `<p>Payment amount: <strong>${money(receipt.amount)}</strong></p>`
   return `<article class="receipt">
     ${company.logoUrl ? `<img class="logo" src="${escapeHtml(company.logoUrl)}" alt="">` : ''}
@@ -158,7 +158,7 @@ async function downloadReceipts(receipts: ManagedReceipt[], filename = 'receipts
     pdf.setFont('helvetica', 'normal')
     if (receipt.kind === 'sale') {
       for (const line of receipt.lines) {
-        const wrapped = pdf.splitTextToSize(`${line.productName} · ${line.packs} ${line.packType}`, 145) as string[]
+        const wrapped = pdf.splitTextToSize(`${line.productName} · ${line.packs}${(line.bonusPacks ?? 0) > 0 ? ` + ${line.bonusPacks} bonus` : ''} ${line.packType}`, 145) as string[]
         pdf.text(wrapped, 14, y)
         pdf.text(money(line.lineTotal), 196, y, { align: 'right' })
         y += Math.max(6, wrapped.length * 5)
@@ -176,6 +176,20 @@ async function downloadReceipts(receipts: ManagedReceipt[], filename = 'receipts
       pdf.text(money(receipt.total ?? receipt.amount), 196, y, { align: 'right' })
       y += 7
       pdf.setFont('helvetica', 'normal')
+      if (receipt.bonusSnapshot?.bonusBoxes) {
+        pdf.setFillColor(240, 253, 244)
+        pdf.roundedRect(14, y - 5, 182, 16, 2, 2, 'FD')
+        pdf.setFont('helvetica', 'bold')
+        pdf.setTextColor(21, 128, 61)
+        pdf.text(`BONUS TAKEN  -  ${receipt.bonusSnapshot.bonusBoxes} free boxes`, 18, y + 3)
+        pdf.setTextColor(0, 0, 0)
+        pdf.setFont('helvetica', 'normal')
+        y += 18
+      }
+      if (receipt.bonusDisabledReason) {
+        pdf.text(`Bonus disabled: ${receipt.bonusDisabledReason}`, 14, y, { maxWidth: 182 })
+        y += 7
+      }
       pdf.text(`Paid: ${money(receipt.paidAmount ?? 0)}    Balance: ${money(receipt.balance ?? 0)}`, 14, y)
       for (const payment of receipt.payments || []) {
         y += 6
@@ -439,7 +453,7 @@ export default function ReceiptManagementPage({
           <header className="flex items-start justify-between border-b border-slate-100 p-5"><div className="flex items-center gap-3">{(selected.company?.logoUrl || companyLogoUrl) && <img src={selected.company?.logoUrl || companyLogoUrl} alt="" className="size-10 rounded object-contain" />}<div><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">{selected.company?.name || companyName}</p><h2 id="receipt-preview-title" className="text-lg font-bold">{selected.kind === 'sale' ? 'Sales receipt' : 'Credit payment receipt'}</h2></div></div><button type="button" onClick={() => setSelected(null)} aria-label="Close receipt" className="rounded-md p-2 text-slate-500 hover:bg-slate-100"><X className="size-4" /></button></header>
           <div className="space-y-4 p-5">
             <div className="grid grid-cols-2 gap-3 text-sm"><div><p className="text-xs text-slate-500">Receipt number</p><p className="font-semibold">{selected.receiptNumber}</p></div><div><p className="text-xs text-slate-500">Date</p><p className="font-semibold">{formatDate(selected.date)}</p></div><div><p className="text-xs text-slate-500">Customer</p><p className="font-semibold">{selected.customer?.name || 'Walk-in customer'}</p></div><div><p className="text-xs text-slate-500">Amount</p><p className="font-semibold">{money(selected.amount)}</p></div></div>
-            {selected.kind === 'sale' ? <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">{selected.lines.map((line, index) => <div key={`${line.productId}-${index}`} className="flex justify-between gap-4 p-3 text-sm"><span>{line.productName} · {line.packs} {line.packType}</span><strong>{money(line.lineTotal)}</strong></div>)}<div className="flex justify-between p-3 text-sm font-bold"><span>Total</span><span>{money(selected.total ?? selected.amount)}</span></div><div className="flex justify-between p-3 text-sm"><span>Paid / balance</span><span>{money(selected.paidAmount ?? 0)} / {money(selected.balance ?? 0)}</span></div></div> : <div className="rounded-lg border border-slate-200 p-3 text-sm"><p>Sale receipt: {selected.saleReceiptNumber}</p><p>Payment method: {selected.payment?.method || '—'}</p>{selected.payment?.txnID && <p>Transaction: {selected.payment.txnID}</p>}</div>}
+            {selected.kind === 'sale' ? <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">{selected.lines.map((line, index) => <div key={`${line.productId}-${index}`} className="flex justify-between gap-4 p-3 text-sm"><span>{line.productName} · {line.packs}{(line.bonusPacks ?? 0) > 0 ? ` + ${line.bonusPacks} bonus` : ''} {line.packType}</span><strong>{money(line.lineTotal)}</strong></div>)}{selected.bonusSnapshot?.bonusBoxes ? <div className="m-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"><p className="text-[11px] font-bold uppercase tracking-wide">Bonus taken</p><p className="mt-1 text-lg font-bold">{selected.bonusSnapshot.bonusBoxes} free boxes</p></div> : null}{selected.bonusDisabledReason ? <div className="p-3 text-sm text-amber-700">Bonus disabled: {selected.bonusDisabledReason}</div> : null}<div className="flex justify-between p-3 text-sm font-bold"><span>Total</span><span>{money(selected.total ?? selected.amount)}</span></div><div className="flex justify-between p-3 text-sm"><span>Paid / balance</span><span>{money(selected.paidAmount ?? 0)} / {money(selected.balance ?? 0)}</span></div></div> : <div className="rounded-lg border border-slate-200 p-3 text-sm"><p>Sale receipt: {selected.saleReceiptNumber}</p><p>Payment method: {selected.payment?.method || '—'}</p>{selected.payment?.txnID && <p>Transaction: {selected.payment.txnID}</p>}</div>}
             <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
               <button type="button" onClick={() => void updateFavorite(selected)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold"><Star className="size-4" />{selected.isFavorite ? 'Saved' : 'Save favorite'}</button>
               <button type="button" onClick={() => void exportOne(selected, 'print')} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold"><Printer className="size-4" />Print</button>

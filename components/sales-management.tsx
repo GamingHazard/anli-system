@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Download, Ellipsis, Eye, Plus, Printer, Search, X } from 'lucide-react'
 import { createId, exportCsv, formatDate, money, packUnitLabel, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
-import { ApiError, confirmOrder, createSale, getCreditCustomerStatement, getCreditReminderSettings, listOrders, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
+import { ApiError, confirmOrder, createSale, getCreditCustomerStatement, getCreditReminderSettings, getSalesBonusSettings, listOrders, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
 
 type Props = {
   mode: 'sales' | 'credit'
@@ -319,9 +319,12 @@ function SaleForm({
   const [lines, setLines] = useState<DraftLine[]>([{ key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])
   const [error, setError] = useState('')
   const [salePending, setSalePending] = useState(false)
+  const [bonusDisabled, setBonusDisabled] = useState(false)
+  const [bonusDisabledReason, setBonusDisabledReason] = useState('')
   const idempotencyKey = useRef(createId('SALE'))
   const customerPickerRef = useRef<HTMLDivElement>(null)
   const productsQuery = useQuery({ queryKey: productQueryKey, queryFn: listProductionProducts })
+  const bonusSettingsQuery = useQuery({ queryKey: ['sales-bonus-settings'], queryFn: getSalesBonusSettings })
   const activeProducts = productsQuery.data?.products.filter((product) =>
     product.active && product.packType && product.piecesPerPack && product.price && product.price > 0,
   ) ?? []
@@ -351,6 +354,22 @@ function SaleForm({
   const canOverridePrice = user.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
   const total = lines.reduce((sumLines, line) => sumLines + (Number(line.packs) || 0) * Number(line.price || 0), 0)
   const todayValue = today()
+  const eligibleBoxQuantity = lines.reduce((total, line) => {
+    const product = activeProducts.find((item) => item.id === line.productId)
+    return product?.packType === 'Box' ? total + (Number(line.packs) || 0) : total
+  }, 0)
+  const bonusPreview = (() => {
+    const settings = bonusSettingsQuery.data?.salesBonus
+    if (!settings?.enabled || bonusDisabled || !eligibleBoxQuantity) return 0
+    if (eligibleBoxQuantity >= settings.volume.minimumQuantity) {
+      return Math.floor(eligibleBoxQuantity / settings.volume.qualifyingQuantity) * settings.volume.bonusQuantity
+    }
+    if (eligibleBoxQuantity >= settings.standard.minimumQuantity && eligibleBoxQuantity <= settings.standard.maximumQuantity) {
+      return Math.floor(eligibleBoxQuantity / settings.standard.qualifyingQuantity) * settings.standard.bonusQuantity
+    }
+    return 0
+  })()
+  const canDisableBonus = user.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
 
   useEffect(() => {
     if (!customerMenuOpen) return
@@ -449,6 +468,7 @@ function SaleForm({
       if (termsToSubmit === 'Credit' && !dueDate) throw new Error('Select a due date for a credit sale.')
       if (amountToSubmit > total) throw new Error('Initial payment cannot exceed the sale total.')
       if (amountToSubmit < total && !savedCustomer) throw new Error('One-time customer sales must be paid in full at the time of sale.')
+      if (bonusDisabled && !bonusDisabledReason.trim()) throw new Error('Provide a reason for disabling the sales bonus.')
       setSalePending(true)
       return await onSubmit({
         customerId: savedCustomer?.id,
@@ -459,6 +479,7 @@ function SaleForm({
         initialPaymentAmount: amountToSubmit,
         initialPaymentMethod: amountToSubmit ? method : undefined,
         idempotencyKey: idempotencyKey.current,
+        ...(bonusDisabled ? { bonusDisabled: true, bonusDisabledReason: bonusDisabledReason.trim() } : {}),
       })
     } catch (caught) {
       setError(errorMessage(caught))
@@ -576,6 +597,29 @@ function SaleForm({
             {terms === 'Credit' && !guest && <label className="text-xs font-semibold text-slate-600">Credit due date<input required type="date" min={todayValue} value={dueDate} disabled={salePending} onChange={(event) => setDueDate(event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" /></label>}
             <label className="text-xs font-semibold text-slate-600">Initial payment (UGX)<input type="number" min="0" step="1" value={guest || terms === 'Paid now' ? total : paymentAmount} disabled={guest || terms === 'Paid now' || salePending} onChange={(event) => setPaymentAmount(Math.max(0, Number(event.target.value)))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-50" /></label>
             {(guest || terms === 'Paid now' || paymentAmount > 0) && <label className="text-xs font-semibold text-slate-600">Payment method<select value={method} disabled={salePending} onChange={(event) => setMethod(event.target.value as SalePayment['method'])} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">{paymentMethods.map((item) => <option key={item}>{item}</option>)}</select></label>}
+          </section>
+          <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-xs font-bold text-emerald-900">Sales bonus preview</h3>
+                <p className="mt-1 text-xs leading-5 text-emerald-800">
+                  {eligibleBoxQuantity.toLocaleString()} eligible box packs · {bonusPreview.toLocaleString()} free boxes
+                </p>
+                <p className="mt-1 text-[10px] leading-4 text-emerald-700">Carton packs do not qualify for this bonus.</p>
+              </div>
+              {canDisableBonus && (
+                <label className="flex min-h-11 items-center gap-2 text-xs font-semibold text-slate-700">
+                  <input type="checkbox" checked={bonusDisabled} disabled={salePending} onChange={(event) => { setBonusDisabled(event.target.checked); if (!event.target.checked) setBonusDisabledReason('') }} className="size-4 accent-primary" />
+                  Disable bonus
+                </label>
+              )}
+            </div>
+            {bonusDisabled && (
+              <label className="mt-3 block text-xs font-semibold text-slate-700">
+                Reason for disabling the bonus
+                <textarea required value={bonusDisabledReason} disabled={salePending} onChange={(event) => setBonusDisabledReason(event.target.value)} maxLength={500} rows={3} className="mt-1.5 w-full rounded-lg border border-amber-200 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" placeholder="Explain why this sale does not receive the bonus" />
+              </label>
+            )}
           </section>
           {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>}
           <footer className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={salePending} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold">Cancel</button><button type="submit" disabled={salePending || stockUnavailable || !activeProducts.length || hasInsufficientStock} className="rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{salePending ? 'Saving sale…' : 'Complete sale'}</button></footer>

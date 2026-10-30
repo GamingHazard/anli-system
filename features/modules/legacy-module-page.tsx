@@ -11,6 +11,7 @@ import AssetManagement from "@/components/asset-management";
 import CompanyProfileManagement from "@/components/company-profile-management";
 import UserManagement from "@/components/user-management";
 import SecuritySettings from "@/components/security-settings";
+import GeneralSettings from "@/components/general-settings";
 import Approvals from "@/components/approvals";
 import LeaveManagement from "@/components/leave-management";
 import DisciplinaryLettersPage from "@/components/disciplinary-letters";
@@ -208,6 +209,8 @@ export function ModulePage({
         onCurrentSessionRevoked={onCurrentSessionRevoked}
       />
     );
+  if (active === "General Settings")
+    return <GeneralSettings currentUser={currentUser} />;
   if (active === "Approvals")
     return (
       <Approvals

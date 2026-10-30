@@ -1,9 +1,10 @@
 export type Status = 'Paid' | 'Pending' | 'Overdue' | 'Approved' | 'Draft' | 'Active' | 'Inactive'
 
-export type SaleLine = { productId: string; productCode: string; productName: string; packType: 'Box' | 'Carton'; piecesPerPack: number; packs: number; quantityPieces: number; catalogPricePerPack: number; pricePerPack: number; overrideReason?: string; lineTotal: number }
+export type SaleLine = { productId: string; productCode: string; productName: string; packType: 'Box' | 'Carton'; piecesPerPack: number; packs: number; bonusPacks?: number; totalStockPacks?: number; quantityPieces: number; catalogPricePerPack: number; pricePerPack: number; overrideReason?: string; lineTotal: number }
 export type SalePartySnapshot = { name: string; contact?: string; phone?: string; email?: string; address?: string; tin?: string }
 export type SaleCompanySnapshot = { name: string; email?: string; phone?: string; address?: string; logoUrl?: string }
-export type Sale = { id: string; date: string; customer: string; customerId?: string; assignedTo?: string | null; createdByName?: string; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Paid now' | 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string; receiptNumber?: string; lines?: SaleLine[]; customerSnapshot?: SalePartySnapshot; companySnapshot?: SaleCompanySnapshot; paidAmount?: number; payments?: SalePayment[]; legacyImported?: boolean }
+export type SaleBonusSnapshot = { enabled: boolean; settingsVersion: number; qualifyingBoxes: number; bonusBoxes: number; tier: 'standard' | 'volume' | ''; calculatedAt?: string }
+export type Sale = { id: string; date: string; customer: string; customerId?: string; assignedTo?: string | null; createdByName?: string; product: string; quantity: number; total: number; status: 'Paid' | 'Pending'; method: string; txnID?: string; paymentTerms?: 'Paid now' | 'Same-day' | 'Credit'; dueDate?: string; creditNeedsReview?: boolean; reference: string; receiptNumber?: string; lines?: SaleLine[]; bonusSnapshot?: SaleBonusSnapshot; bonusDisabledReason?: string; customerSnapshot?: SalePartySnapshot; companySnapshot?: SaleCompanySnapshot; paidAmount?: number; payments?: SalePayment[]; legacyImported?: boolean }
 export type SalePayment = { id: string; saleId: string; paymentReceiptNumber?: string; amount: number; date: string; method: 'Cash' | 'Mobile Money' | 'Bank Transfer' | 'Check' | 'Card' | 'Legacy'; txnID?: string; note?: string; recordedAt: string }
 export type ManagedReceipt = {
   id: string
@@ -24,6 +25,8 @@ export type ManagedReceipt = {
   isFavorite: boolean
   isArchived: boolean
   archivedAt?: string | null
+  bonusSnapshot?: SaleBonusSnapshot
+  bonusDisabledReason?: string
 }
 export type ReceiptStats = { count: number; totalAmount: number; totalPaid: number; outstanding: number }
 export type InvoiceStatus = 'Draft' | 'Ready to submit' | 'Submitted' | 'Issued' | 'Failed' | 'Cancelled' | 'Credit note'
@@ -1464,6 +1467,7 @@ export const navGroups = [
     { label: 'User Management', icon: 'UserCog' },
     // { label: 'Finance Settings', icon: 'SlidersHorizontal' },
     { label: 'Security Settings', icon: 'LockKeyhole' },
+    { label: 'General Settings', icon: 'SlidersHorizontal' },
   ] },
 ]
 export const allNavItems = navGroups.flatMap(group => group.items)

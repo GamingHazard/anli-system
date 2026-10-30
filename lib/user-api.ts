@@ -670,6 +670,8 @@ type ApiSale = {
   dueDate?: string
   payments?: ApiPayment[]
   createdAt: string
+  bonusSnapshot?: Sale['bonusSnapshot']
+  bonusDisabledReason?: string
 }
 
 function normalizeSalePayment(payment: ApiPayment): SalePayment {
@@ -715,6 +717,8 @@ function normalizeSale(sale: ApiSale): { sale: Sale; payments: SalePayment[] } {
       paidAmount: sale.paidAmount,
       payments,
       legacyImported: sale.legacyImported,
+      bonusSnapshot: sale.bonusSnapshot,
+      bonusDisabledReason: sale.bonusDisabledReason || undefined,
     },
     payments,
   }
@@ -730,6 +734,8 @@ export type CreateSaleInput = {
   initialPaymentMethod?: SalePayment['method']
   initialPaymentTxnID?: string
   idempotencyKey: string
+  bonusDisabled?: boolean
+  bonusDisabledReason?: string
 }
 
 export async function listSales() {
@@ -2422,6 +2428,34 @@ export function getSessionProtectionSettings() {
 
 export function updateSessionProtectionSettings(settings: SessionProtectionSettings) {
   return request<{ sessionProtection: SessionProtectionSettings }>('/security-settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  })
+}
+
+export type SalesBonusSettings = {
+  enabled: boolean
+  standard: {
+    minimumQuantity: number
+    maximumQuantity: number
+    qualifyingQuantity: number
+    bonusQuantity: number
+  }
+  volume: {
+    minimumQuantity: number
+    qualifyingQuantity: number
+    bonusQuantity: number
+  }
+  version: number
+  updatedAt: string | null
+}
+
+export function getSalesBonusSettings() {
+  return request<{ salesBonus: SalesBonusSettings }>('/sales-bonus-settings')
+}
+
+export function updateSalesBonusSettings(settings: SalesBonusSettings) {
+  return request<{ salesBonus: SalesBonusSettings }>('/sales-bonus-settings', {
     method: 'PUT',
     body: JSON.stringify(settings),
   })

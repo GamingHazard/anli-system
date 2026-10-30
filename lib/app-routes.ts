@@ -23,6 +23,7 @@ const routesBySection: Record<string, string> = {
   "Company Profile Management": "/settings/company",
   "User Management": "/settings/users",
   "Security Settings": "/settings/security",
+  "General Settings": "/settings/general",
 };
 
 const sectionsByRoute = Object.fromEntries(

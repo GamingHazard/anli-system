@@ -33,6 +33,7 @@ const settingsSections = new Set([
   'Company Profile Management',
   'User Management',
   'Security Settings',
+  'General Settings',
 ])
 
 export function hasDepartmentRole(roles: readonly UserRole[], requiredRole: UserRole) {
@@ -50,6 +51,9 @@ export function canAccessSection(roles: readonly UserRole[], section: string) {
   if (settingsSections.has(section)) {
     if (section === 'User Management') {
       return roles.some((role) => ['General Manager', 'Human Resource'].includes(role))
+    }
+    if (section === 'General Settings') {
+      return roles.some((role) => ['General Manager', 'Sales Manager'].includes(role))
     }
     return roles.includes('General Manager') && section === 'Company Profile Management'
   }
