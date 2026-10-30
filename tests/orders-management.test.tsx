@@ -75,6 +75,21 @@ function renderOrders() {
   )
 }
 
+function renderOrdersForUser(currentUser: UserAccount) {
+  const state = { ...cloneSeed(), orders: [] }
+  render(
+    <OrdersManagement
+      state={state}
+      currentUser={currentUser}
+      customersLoaded
+      customersApiLoaded
+      customerLoadError=""
+      onRetryCustomers={vi.fn()}
+      onStateChange={vi.fn()}
+    />,
+  )
+}
+
 describe('orders-management', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -168,5 +183,23 @@ describe('orders-management', () => {
     expect((quantity as HTMLInputElement).value).toBe('')
     fireEvent.change(quantity!, { target: { value: '12' } })
     expect((quantity as HTMLInputElement).value).toBe('12')
+  })
+
+  it('lets marketing managers create orders but hides processing actions', async () => {
+    ordersApi.listOrders.mockResolvedValue([createOrderRecord('PENDING-1', 'Pending', 50000)])
+    renderOrdersForUser({ ...manager, name: 'Marketing Manager', roles: ['Marketing Manager'] })
+
+    expect(await screen.findByRole('button', { name: 'Create order' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for ORD-PENDING-1' }))
+    expect(screen.queryByRole('menuitem', { name: 'Confirm' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Edit order' })).toBeNull()
+  })
+
+  it('shows processing actions to sales managers', async () => {
+    ordersApi.listOrders.mockResolvedValue([createOrderRecord('PENDING-1', 'Pending', 50000)])
+    renderOrders()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for ORD-PENDING-1' }))
+    expect(screen.getByRole('menuitem', { name: 'Confirm' })).toBeTruthy()
   })
 })

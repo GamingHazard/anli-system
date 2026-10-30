@@ -139,3 +139,10 @@ export function canManageAccount(currentUser: UserAccount, account: UserAccount)
   }
   return false
 }
+
+export function canCreateOrders(roles: readonly UserRole[]) {
+  return roles.includes('Marketing Manager')
+    || roles.includes('Sales Manager')
+    || roles.includes('General Manager')
+    || roles.includes('Super Admin')
+}

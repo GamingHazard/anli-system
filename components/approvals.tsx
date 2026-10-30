@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { CheckCircle2, ChevronRight, CircleAlert, Clock3, FileCheck2, History, Inbox, RefreshCw, Search, X } from 'lucide-react'
+import { CheckCircle2, ChevronRight, CircleAlert, Clock3, FileCheck2, History, Inbox, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 import { formatDate, money, type AdvanceRepaymentFrequency } from '@/lib/erp'
 import { useApprovalDecision, useApprovalInbox } from '@/lib/approval-inbox-queries'
 import type { ApprovalInboxItem, ApprovalSource, ApprovalStatus } from '@/lib/approval-inbox'
@@ -42,6 +42,7 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [search, setSearch] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [selected, setSelected] = useState<ApprovalInboxItem | null>(null)
   const [decisionNote, setDecisionNote] = useState('')
   const [decisionTerms, setDecisionTerms] = useState({
@@ -71,6 +72,13 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
     })
   }, [currentItems, search, sourceFilter, stageFilter, statusFilter, fromDate, toDate])
   const isSaving = decisionMutation.isPending
+  const activeFilterCount = [
+    sourceFilter !== 'All sources',
+    stageFilter !== 'All stages',
+    statusFilter !== 'All statuses',
+    Boolean(fromDate),
+    Boolean(toDate),
+  ].filter(Boolean).length
 
   const openItem = (item: ApprovalInboxItem) => {
     setSelected(item)
@@ -160,7 +168,7 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">Workflow center</p>
           <h1 className="text-2xl font-bold tracking-tight text-slate-950">Approvals</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-500">
+          <p className="mt-1 hidden max-w-2xl text-sm text-slate-500 sm:block">
             A single, permission-aware inbox for requests waiting on your review and decisions in progress.
           </p>
         </div>
@@ -171,15 +179,15 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
             aria-label="Refresh approvals"
             onClick={() => void inboxQuery.refetch()}
             disabled={inboxQuery.isFetching}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50 sm:min-h-0 sm:py-2"
           >
             <RefreshCw className={`size-3.5 ${inboxQuery.isFetching ? 'animate-spin' : ''}`} />
-            Refresh
+            <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </header>
 
-      <section aria-label="Approval overview" className="mb-5 grid gap-3 sm:grid-cols-3">
+      <section aria-label="Approval overview" className="mb-5 grid grid-cols-3 gap-2 sm:gap-3">
         <SummaryMetric title="My actions" value={inboxQuery.data?.counts.actionable ?? actions.length} icon={<CheckCircle2 className="size-4" />} tone="amber" />
         <SummaryMetric title="In progress" value={inboxQuery.data?.counts.inProgress ?? inProgress.length} icon={<Clock3 className="size-4" />} tone="blue" />
         <SummaryMetric title="Recent decisions" value={inboxQuery.data?.counts.history ?? history.length} icon={<FileCheck2 className="size-4" />} tone="green" />
@@ -198,7 +206,7 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
               role="tab"
               aria-selected={view === tab.label}
               onClick={() => setView(tab.label)}
-              className={`-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-xs font-semibold transition sm:px-4 ${view === tab.label ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+              className={`-mb-px inline-flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-xs font-semibold transition sm:px-4 sm:py-3 ${view === tab.label ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
             >
               {tab.icon}
               {tab.label}
@@ -214,7 +222,30 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
               {inboxQuery.isLoading ? 'Loading inbox…' : `${visible.length} ${visible.length === 1 ? 'request' : 'requests'} shown`}
             </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <div className="flex gap-2 sm:hidden">
+            <label className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
+              <Search className="size-4 shrink-0 text-slate-400" />
+              <input
+                aria-label="Search approvals on mobile"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search approvals"
+                className="min-w-0 flex-1 bg-transparent text-xs outline-none"
+              />
+            </label>
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={filtersOpen}
+              onClick={() => setFiltersOpen(true)}
+              className="relative inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"
+            >
+              <SlidersHorizontal className="size-4" />
+              Filters
+              {activeFilterCount > 0 && <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">{activeFilterCount}</span>}
+            </button>
+          </div>
+          <div className="hidden flex-col gap-2 sm:flex sm:flex-row sm:flex-wrap">
             <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
               <Search className="size-4 shrink-0 text-slate-400" />
               <input
@@ -302,7 +333,7 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
                 <button
                   type="button"
                   onClick={() => openItem(item)}
-                  className="inline-flex shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-primary/30 hover:text-primary"
+                  className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-primary/30 hover:text-primary sm:min-h-0 sm:w-auto sm:py-2"
                 >
                   {item.canAct ? 'Review' : 'View details'}<ChevronRight className="size-3.5" />
                 </button>
@@ -346,6 +377,115 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
           onDecision={decide}
         />
       )}
+
+      {filtersOpen && (
+        <ApprovalFilterSheet
+          sourceFilter={sourceFilter}
+          setSourceFilter={setSourceFilter}
+          stageFilter={stageFilter}
+          setStageFilter={setStageFilter}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          fromDate={fromDate}
+          setFromDate={setFromDate}
+          toDate={toDate}
+          setToDate={setToDate}
+          stages={availableStages}
+          onClear={() => {
+            setSourceFilter('All sources')
+            setStageFilter('All stages')
+            setStatusFilter('All statuses')
+            setFromDate('')
+            setToDate('')
+          }}
+          onClose={() => setFiltersOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ApprovalFilterSheet({
+  sourceFilter,
+  setSourceFilter,
+  stageFilter,
+  setStageFilter,
+  statusFilter,
+  setStatusFilter,
+  fromDate,
+  setFromDate,
+  toDate,
+  setToDate,
+  stages,
+  onClear,
+  onClose,
+}: {
+  sourceFilter: ApprovalSource | 'All sources'
+  setSourceFilter: (value: ApprovalSource | 'All sources') => void
+  stageFilter: string
+  setStageFilter: (value: string) => void
+  statusFilter: ApprovalStatus | 'All statuses'
+  setStatusFilter: (value: ApprovalStatus | 'All statuses') => void
+  fromDate: string
+  setFromDate: (value: string) => void
+  toDate: string
+  setToDate: (value: string) => void
+  stages: string[]
+  onClear: () => void
+  onClose: () => void
+}) {
+  return (
+    <div
+      role="presentation"
+      className="fixed inset-0 z-[80] grid items-end bg-slate-950/45 backdrop-blur-[1px]"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}
+    >
+      <section role="dialog" aria-modal="true" aria-labelledby="approval-filter-title" className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl">
+        <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-300 sm:hidden" />
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3.5">
+          <h2 id="approval-filter-title" className="text-sm font-bold text-slate-900">Filter approvals</h2>
+          <button type="button" aria-label="Close approval filters" onClick={onClose} className="grid size-11 place-items-center rounded-lg text-slate-500 hover:bg-slate-100">
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="grid gap-4 p-4">
+          <label className="text-xs font-semibold text-slate-600">
+            Workflow
+            <select aria-label="Mobile filter approvals by workflow" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as ApprovalSource | 'All sources')} className={`${inputClass} mt-1.5 min-h-11 w-full`}>
+              <option>All sources</option>
+              {sources.map((source) => <option key={source} value={source}>{source}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-slate-600">
+            Stage
+            <select aria-label="Mobile filter approvals by stage" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)} className={`${inputClass} mt-1.5 min-h-11 w-full`}>
+              <option>All stages</option>
+              {stages.map((stage) => <option key={stage}>{stage}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-slate-600">
+            Status
+            <select aria-label="Mobile filter approvals by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ApprovalStatus | 'All statuses')} className={`${inputClass} mt-1.5 min-h-11 w-full`}>
+              <option>All statuses</option>
+              {(['Awaiting review', 'In progress', 'Approved', 'Rejected', 'Returned', 'Cancelled'] as ApprovalStatus[]).map((status) => <option key={status}>{status}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs font-semibold text-slate-600">
+              From
+              <input aria-label="Mobile filter approvals from date" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className={`${inputClass} mt-1.5 min-h-11 w-full`} />
+            </label>
+            <label className="text-xs font-semibold text-slate-600">
+              To
+              <input aria-label="Mobile filter approvals to date" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className={`${inputClass} mt-1.5 min-h-11 w-full`} />
+            </label>
+          </div>
+        </div>
+        <footer className="sticky bottom-0 grid grid-cols-2 gap-2 border-t border-slate-100 bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+          <button type="button" onClick={onClear} className="min-h-11 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-700">Clear all</button>
+          <button type="button" onClick={onClose} className="min-h-11 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground">Show results</button>
+        </footer>
+      </section>
     </div>
   )
 }
@@ -353,10 +493,10 @@ export default function Approvals({ currentUser, onViewSalaryAdvance, onViewPayr
 function SummaryMetric({ title, value, icon, tone }: { title: string; value: number; icon: React.ReactNode; tone: 'amber' | 'blue' | 'green' }) {
   const palette = tone === 'amber' ? 'bg-amber-50 text-amber-700' : tone === 'blue' ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <span className={`grid size-9 place-items-center rounded-lg ${palette}`}>{icon}</span>
-      <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
-      <div className="mt-0.5 text-xs font-semibold text-slate-600">{title}</div>
+    <article className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <span className={`grid size-8 place-items-center rounded-lg sm:size-9 ${palette}`}>{icon}</span>
+      <div className="mt-2 text-xl font-bold tracking-tight text-slate-900 sm:mt-3 sm:text-2xl">{value}</div>
+      <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-600 sm:text-xs">{title}</div>
     </article>
   )
 }
@@ -391,17 +531,17 @@ function ApprovalDialog({
 
   return (
     <div
-      className="fixed inset-0 z-80 grid place-items-center bg-slate-950/45 p-3 backdrop-blur-[2px] sm:p-6"
+      className="fixed inset-0 z-[80] grid items-end bg-slate-950/45 backdrop-blur-[2px] sm:place-items-center sm:p-6"
       onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) onClose() }}
     >
-      <section role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title" className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+      <section role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title" className="max-h-[96dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:max-h-[92vh] sm:rounded-2xl">
         <header className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur sm:px-6">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-primary">{item.source} · {item.reference}</p>
             <h2 id="approval-dialog-title" className="mt-1 text-lg font-bold text-slate-900">{canDecide ? 'Review request' : 'Approval details'}</h2>
             <p className="mt-1 text-xs text-slate-500">Submitted by {item.requester} · {displayDate(item.submittedAt)}</p>
           </div>
-          <button type="button" aria-label="Close approval details" disabled={isSaving} onClick={onClose} className="grid size-9 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50">
+          <button type="button" aria-label="Close approval details" disabled={isSaving} onClick={onClose} className="grid size-11 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 sm:size-9">
             <X className="size-4" />
           </button>
         </header>
@@ -472,19 +612,19 @@ function ApprovalDialog({
           {item.status === 'In progress' && <p role="status" className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">This request is currently waiting for {item.stage || 'another workflow step'}.</p>}
           {message && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{message}</p>}
 
-          <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
-            <button type="button" disabled={isSaving} onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 disabled:opacity-50">Close</button>
+          <footer className="sticky bottom-0 -mx-5 grid gap-2 border-t border-slate-100 bg-white/95 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 backdrop-blur sm:-mx-0 sm:flex sm:flex-wrap sm:justify-end sm:rounded-none sm:bg-transparent sm:px-0 sm:pb-0">
+            <button type="button" disabled={isSaving} onClick={onClose} className="min-h-11 rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 disabled:opacity-50 sm:min-h-0">Close</button>
             {canDecide && (
               <>
                 <button
                   type="button"
-                  disabled={isSaving || !note.trim()}
+                  disabled={isSaving}
                   onClick={() => void onDecision('Rejected')}
-                  className="rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-45"
+                  className="min-h-11 rounded-lg border border-rose-200 px-4 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-45 sm:min-h-0"
                 >
                   {item.source === 'Payroll' ? 'Return for correction' : 'Reject'}
                 </button>
-                <button type="button" disabled={isSaving} onClick={() => void onDecision('Approved')} className="rounded-lg bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" disabled={isSaving} onClick={() => void onDecision('Approved')} className="min-h-11 rounded-lg bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-0">
                   {isSaving ? 'Saving…' : item.stage ? `Approve · ${item.stage}` : 'Approve'}
                 </button>
               </>

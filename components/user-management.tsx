@@ -11,6 +11,7 @@ type PendingStatus = { account: UserAccount; status: 'Suspended' | 'Deactivated'
 type PasswordReset = { account: UserAccount; temporaryPassword: string; expiresAt: string }
 
 const roles = [...USER_ROLES]
+const SINGLE_USER_ROLES: UserRole[] = ['Human Resource', 'Inventory Manager']
 const statusTone: Record<AccountStatus, string> = {
   Active: 'bg-emerald-50 text-emerald-700',
   Suspended: 'bg-amber-50 text-amber-800',
@@ -69,8 +70,8 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
 
   const activeAccounts = accounts.filter((account) => account.status === 'Active')
   const suspendedAccounts = accounts.filter((account) => account.status === 'Suspended')
-  const assignedUniqueRoles = new Set(accounts.filter((account) => account.status !== 'Deactivated').flatMap((account) => account.roles).filter((role) => role !== 'Admin')).size
-  const vacantRoles = roles.length - 1 - assignedUniqueRoles
+  const assignedUniqueRoles = new Set(accounts.filter((account) => account.status !== 'Deactivated').flatMap((account) => account.roles).filter((role) => SINGLE_USER_ROLES.includes(role))).size
+  const vacantRoles = SINGLE_USER_ROLES.length - assignedUniqueRoles
   const creatableRoles = creatableRolesForAccountManager(currentUser.roles)
   const filteredAccounts = useMemo(() => accounts.filter((account) => canManageAccount(currentUser, account)).filter((account) => {
     const searchable = `${account.name} ${account.email} ${account.roles.join(' ')}`.toLowerCase()
@@ -110,7 +111,7 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
       setMessage('That email address is already in use.')
       return
     }
-    const unavailableRole = selectedRoles.find((role) => role !== 'Admin' && accounts.some((account) => account.id !== editing?.id && account.status !== 'Deactivated' && account.roles.includes(role)))
+    const unavailableRole = selectedRoles.find((role) => SINGLE_USER_ROLES.includes(role) && accounts.some((account) => account.id !== editing?.id && account.status !== 'Deactivated' && account.roles.includes(role)))
     if (unavailableRole) {
       setMessage(`${unavailableRole} is already assigned to another account.`)
       return
@@ -209,7 +210,7 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
     <section aria-label="Account summary" className="mb-5 grid gap-3 sm:grid-cols-3">
       <SummaryMetric label="Active accounts" value={activeAccounts.length} detail="Enabled accounts" icon="UsersRound" tone="green" />
       <SummaryMetric label="Suspended" value={suspendedAccounts.length} detail="Temporarily restricted" icon="UserRoundX" tone="amber" />
-      <SummaryMetric label="Vacant unique roles" value={vacantRoles} detail="Admin may have multiple owners" icon="ShieldAlert" tone="blue" />
+      <SummaryMetric label="Vacant unique roles" value={vacantRoles} detail="HR and Inventory Manager are single-user roles" icon="ShieldAlert" tone="blue" />
     </section>
 
     <div className="mb-4 flex gap-1 border-b border-slate-200" role="tablist" aria-label="User management views">
@@ -234,8 +235,8 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
       </tbody></table></div>
       <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Role ownership rules are validated by the server.</footer>
     </section> : <section aria-label="Role coverage" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <header className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold text-slate-900">Role coverage</h3><p className="mt-1 text-xs text-slate-500">Admin can be shared; all other roles have a single owner in this preview.</p></header>
-      <div className="divide-y divide-slate-100">{roles.map((role) => { const owners = roleAssignees(role); return <div key={role} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Icons.Shield className="size-4 text-slate-400" /><span className="text-xs font-semibold text-slate-800">{role}</span>{role !== 'Admin' && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">Single owner</span>}</div><div className="flex flex-wrap gap-2">{owners.length ? owners.map((owner) => <span key={owner.id} className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700"><span className="size-1.5 rounded-full bg-emerald-500" />{owner.name}</span>) : <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800"><Icons.CircleAlert className="size-3.5" />Unassigned</span>}</div></div> })}</div>
+      <header className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold text-slate-900">Role coverage</h3><p className="mt-1 text-xs text-slate-500">Human Resource and Inventory Manager can each have only one assigned user.</p></header>
+      <div className="divide-y divide-slate-100">{roles.map((role) => { const owners = roleAssignees(role); return <div key={role} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Icons.Shield className="size-4 text-slate-400" /><span className="text-xs font-semibold text-slate-800">{role}</span>{SINGLE_USER_ROLES.includes(role) && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">Single owner</span>}</div><div className="flex flex-wrap gap-2">{owners.length ? owners.map((owner) => <span key={owner.id} className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700"><span className="size-1.5 rounded-full bg-emerald-500" />{owner.name}</span>) : <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800"><Icons.CircleAlert className="size-3.5" />Unassigned</span>}</div></div> })}</div>
     </section>}
 
     {activity.length > 0 && <section className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white"><header className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold text-slate-900">Recent changes</h3><p className="mt-1 text-xs text-slate-500">Actions in this browser session; authoritative audit logging is not included.</p></header><div className="divide-y divide-slate-100">{activity.map((entry) => <div key={entry.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"><span className="text-xs font-medium text-slate-700">{entry.message}</span><time className="text-[10px] text-slate-400">{formatTimestamp(entry.time)}</time></div>)}</div></section>}
@@ -258,7 +259,7 @@ function SummaryMetric({ label, value, detail, icon, tone }: { label: string; va
 function UserForm({ account, accounts, creatableRoles, message, saving, onClose, onSave }: { account: UserAccount | null; accounts: UserAccount[]; creatableRoles: UserRole[]; message: string; saving: boolean; onClose: () => void; onSave: (event: React.FormEvent<HTMLFormElement>) => void | Promise<void> }) {
   const [selectedRoles, setSelectedRoles] = useState<UserRole[]>(account?.roles ?? [])
   const activeSuperAdmins = accounts.filter((candidate) => candidate.status === 'Active' && candidate.roles.includes('Super Admin'))
-  const availableRoles = (role: UserRole) => role === 'Admin' || !accounts.some((candidate) => candidate.id !== account?.id && candidate.status !== 'Deactivated' && candidate.roles.includes(role))
+  const availableRoles = (role: UserRole) => !SINGLE_USER_ROLES.includes(role) || !accounts.some((candidate) => candidate.id !== account?.id && candidate.status !== 'Deactivated' && candidate.roles.includes(role))
   const toggleRole = (role: UserRole) => {
     if (role === 'Admin') {
       setSelectedRoles(selectedRoles.includes('Admin') ? [] : ['Admin'])
