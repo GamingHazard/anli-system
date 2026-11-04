@@ -13,6 +13,7 @@ import {
   listProductionMaterialMovements,
   listProductionMaterialReceipts,
   listProductionMaterialUsages,
+  listRawMaterialCounts,
   listProductionMaterials,
   listProductionProducts,
   listRawMaterialAlerts,
@@ -28,9 +29,11 @@ import {
   type RawMaterialLocationBalance,
   type RawMaterialMovementType,
   type RawMovementRecord,
+  type RawMaterialCountRecord,
+  submitRawMaterialCount,
 } from '@/lib/user-api'
 
-type View = 'Inventory' | 'Stock-in history' | 'Daily production use' | 'All movements' | 'Low stock'
+type View = 'Inventory' | 'Stock-in history' | 'Daily production use' | 'Packaging' | 'All movements' | 'Low stock'
 type Dialog = 'material' | 'editMaterial' | 'deleteMaterial' | 'receipt' | 'adjustment' | 'transfer' | 'location' | null
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const validDateInput = (value: string) => {
@@ -44,6 +47,8 @@ const queryKey = ['raw-material-inventory']
 
 type PackagingLevelInput = { name: string; quantity: string }
 type UsagePeriod = 'all' | 'today' | 'week' | 'month'
+type MessageTone = 'success' | 'error' | 'info'
+const materialCategories = ['Ingredients', 'Packaging', 'Cleaning supplies', 'Chemicals', 'Fuel and lubricants', 'Spare parts', 'Maintenance materials', 'General supplies']
 
 function usagePeriodRange(period: UsagePeriod) {
   const end = today()
@@ -80,6 +85,20 @@ function describePackaging(material: ProductionMaterial) {
       : `${level.quantity.toLocaleString()} ${levels[index - 1].name} = ${baseUnitsPerPackage.toLocaleString()} ${material.unit}`
     return `1 ${level.name} = ${contained}`
   }).join('; ')
+}
+
+function packageBreakdown(quantity: number, material: ProductionMaterial) {
+  const choices = packagingChoices(material).slice().reverse()
+  let remainder = quantity
+  const breakdown = choices.flatMap((choice) => {
+    const count = Math.floor((remainder + Number.EPSILON) / choice.baseUnitsPerPackage)
+    remainder -= count * choice.baseUnitsPerPackage
+    return count > 0 ? [`${count.toLocaleString()} ${choice.name}`] : []
+  })
+  if (remainder > 0 || !breakdown.length) {
+    breakdown.push(`${remainder.toLocaleString()} ${material.unit}`)
+  }
+  return breakdown.join(' + ')
 }
 
 function messageFor(error: unknown) {
@@ -134,6 +153,10 @@ export default function RawMaterialManagement({
   const [expandedUsageId, setExpandedUsageId] = useState('')
   const [editingUsage, setEditingUsage] = useState<ProductionMaterialUsageRecord | null>(null)
   const [message, setMessage] = useState('')
+  const [messageTone, setMessageTone] = useState<MessageTone>('info')
+  const showSuccess = (text: string) => { setMessageTone('success'); setMessage(text) }
+  const showError = (text: string) => { setMessageTone('error'); setMessage(text) }
+  const clearMessage = () => { setMessageTone('info'); setMessage('') }
 
   const workspace = useQuery({
     queryKey,
@@ -157,6 +180,11 @@ export default function RawMaterialManagement({
         users: users.users,
       }
     },
+  })
+
+  const physicalCounts = useQuery({
+    queryKey: ['raw-material-counts'],
+    queryFn: () => listRawMaterialCounts({ limit: 200 }),
   })
   const data = workspace.data
   const materials = data?.materials ?? []
@@ -232,8 +260,8 @@ export default function RawMaterialManagement({
     ])
   }
   const mutationOptions = (success: string) => ({
-    onSuccess: async () => { setMessage(success); await refresh() },
-    onError: (error: Error) => setMessage(messageFor(error)),
+    onSuccess: async () => { showSuccess(success); await refresh() },
+    onError: (error: Error) => showError(messageFor(error)),
   })
   const createMaterialMutation = useMutation({
     mutationFn: createProductionMaterial,
@@ -243,20 +271,20 @@ export default function RawMaterialManagement({
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof updateProductionMaterial>[1] }) => updateProductionMaterial(id, input),
     onSuccess: async () => {
       setDialog(null)
-      setMessage('Raw material profile updated.')
+      showSuccess('Raw material profile updated.')
       await refresh()
     },
-    onError: (error: Error) => setMessage(messageFor(error)),
+    onError: (error: Error) => showError(messageFor(error)),
   })
   const deleteMaterialMutation = useMutation({
     mutationFn: deleteProductionMaterial,
     onSuccess: async (result) => {
       setDialog(null)
       setSelectedMaterial(null)
-      setMessage(`Raw material deleted. Removed ${result.deletedStock.toLocaleString()} ${result.deletedUnit} of current stock; ${result.preservedMovementCount} historical movements were retained.`)
+      showSuccess(`Raw material deleted. Removed ${result.deletedStock.toLocaleString()} ${result.deletedUnit} of current stock; ${result.preservedMovementCount} historical movements were retained.`)
       await refresh()
     },
-    onError: (error: Error) => setMessage(messageFor(error)),
+    onError: (error: Error) => showError(messageFor(error)),
   })
   const receiptMutation = useMutation({
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof receiveProductionMaterial>[1] }) => receiveProductionMaterial(id, input),
@@ -277,33 +305,34 @@ export default function RawMaterialManagement({
   const usageMutation = useMutation({
     mutationFn: postProductionMaterialUsage,
     onSuccess: async ({ usage }) => {
-      setMessage(`${usage.reference} posted: ${usage.lines.length} raw materials used for ${usage.tanksProduced} tank(s).`)
+      showSuccess(`${usage.reference} posted: ${usage.lines.length} raw materials used for ${usage.tanksProduced} tank(s).`)
       setSelectedProductId('')
       setTankCount('1')
       await refresh()
     },
-    onError: (error: Error) => setMessage(messageFor(error)),
+    onError: (error: Error) => showError(messageFor(error)),
   })
   const usageUpdateMutation = useMutation({
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof updateProductionMaterialUsage>[1] }) => updateProductionMaterialUsage(id, input),
     onSuccess: async ({ usage }) => {
       setEditingUsage(null)
-      setMessage(`${usage.reference} updated. Stock corrections were added to the movement history.`)
+      showSuccess(`${usage.reference} updated. Stock corrections were added to the movement history.`)
       await refresh()
     },
-    onError: (error: Error) => setMessage(messageFor(error)),
+    onError: (error: Error) => showError(messageFor(error)),
   })
 
   const submitForm = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    setMessage('')
+    clearMessage()
     if (dialog === 'material' || dialog === 'editMaterial') {
       const input = {
         code: String(form.get('code')).trim(),
         name: String(form.get('name')).trim(),
         category: String(form.get('category')).trim(),
         unit: String(form.get('unit')).trim(),
+        trackingMode: String(form.get('trackingMode')) as 'recipe-consumption' | 'physical-count',
         packagingLevels: form.getAll('packagingName').map((name, index) => ({
           name: String(name).trim(),
           quantity: Number(form.getAll('packagingQuantity')[index]),
@@ -368,7 +397,7 @@ export default function RawMaterialManagement({
     event.preventDefault()
     if (!selectedProduct || !selectedRecipe.length || !validDateInput(productionDate)
       || !Number.isFinite(tankNumber) || tankNumber <= 0 || insufficientLine) return
-    setMessage('')
+    clearMessage()
     usageMutation.mutate({
       productId: selectedProduct.id,
       productionDate,
@@ -382,7 +411,7 @@ export default function RawMaterialManagement({
     event.preventDefault()
     if (!editingUsage) return
     const form = new FormData(event.currentTarget)
-    setMessage('')
+    clearMessage()
     usageUpdateMutation.mutate({
       id: editingUsage.id,
       input: {
@@ -449,9 +478,9 @@ export default function RawMaterialManagement({
       }
       const filename = `${usage.reference}-${usage.productionDate}`.replace(/[^a-zA-Z0-9_-]/g, '-')
       pdf.save(`${filename}.pdf`)
-      setMessage(`PDF downloaded for ${usage.reference}.`)
+      showSuccess(`PDF downloaded for ${usage.reference}.`)
     } catch (error) {
-      setMessage(`PDF could not be created: ${messageFor(error)}`)
+      showError(`PDF could not be created: ${messageFor(error)}`)
     }
   }
 
@@ -497,9 +526,9 @@ export default function RawMaterialManagement({
       link.download = 'legacy-raw-material-migration.json'
       link.click()
       URL.revokeObjectURL(url)
-      setMessage('Legacy inventory export downloaded. Review it with the backend migration dry run before importing.')
+      showSuccess('Legacy inventory export downloaded. Review it with the backend migration dry run before importing.')
     } catch (error) {
-      setMessage(messageFor(error))
+      showError(messageFor(error))
     }
   }
 
@@ -526,22 +555,22 @@ export default function RawMaterialManagement({
 
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div role="tablist" aria-label="Raw material views" className="flex gap-1 overflow-x-auto border-b border-slate-200 px-4 pt-2">
-        {(['Inventory', 'Stock-in history', 'Daily production use', 'All movements', 'Low stock'] as View[]).map((item) => <button key={item} type="button" role="tab" aria-selected={view === item} onClick={() => setView(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item}<span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item === 'Inventory' ? materials.length : item === 'Stock-in history' ? receiptGroups.length : item === 'Daily production use' ? usages.length : item === 'All movements' ? movements.length : alerts.length}</span></button>)}
+        {(['Inventory', 'Stock-in history', 'Daily production use', 'Packaging', 'All movements', 'Low stock'] as View[]).map((item) => <button key={item} type="button" role="tab" aria-selected={view === item} onClick={() => setView(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item}<span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item === 'Inventory' ? materials.length : item === 'Stock-in history' ? receiptGroups.length : item === 'Daily production use' ? usages.length : item === 'Packaging' ? physicalCounts.data?.counts.length ?? 0 : item === 'All movements' ? movements.length : alerts.length}</span></button>)}
       </div>
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 xl:flex-row xl:items-center xl:justify-between">
-        <div><h3 className="text-sm font-bold">{view}</h3><p className="mt-1 text-xs text-slate-500">        {view === 'Daily production use' ? `${visibleUsages.length} usage records · filter by production date and product` : view === 'Inventory' ? `${visibleMaterials.length} materials · balances are maintained per location` : view === 'Stock-in history' ? `${receiptGroups.length} receipts` : view === 'Low stock' ? `${alerts.length} notification-ready low-stock alerts · delivery is not enabled` : `${visibleMovements.length} movements`}</p></div>
-        {view !== 'Daily production use' && <div className="flex flex-wrap gap-2">
+        <div><h3 className="text-sm font-bold">{view}</h3><p className="mt-1 text-xs text-slate-500">{view === 'Daily production use' ? `${visibleUsages.length} usage records · filter by production date and product` : view === 'Packaging' ? 'Record physical packaging stock and reconcile ledger variances by location.' : view === 'Inventory' ? `${visibleMaterials.length} materials · balances are maintained per location` : view === 'Stock-in history' ? `${receiptGroups.length} receipts` : view === 'Low stock' ? `${alerts.length} notification-ready low-stock alerts · delivery is not enabled` : `${visibleMovements.length} movements`}</p></div>
+        {view !== 'Daily production use' && view !== 'Packaging' && <div className="flex flex-wrap gap-2">
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><Icons.Search className="size-4 text-slate-400" /><input aria-label={`Search ${view}`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search material or reference" className="w-44 bg-transparent text-xs outline-none" /></label>
           {view === 'Inventory' ? <select aria-label="Filter inventory location" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"><option>All locations</option>{locations.map((location) => <option key={location}>{location}</option>)}</select> : view !== 'Low stock' && <><select aria-label="Filter movement type" value={movementFilter} onChange={(event) => setMovementFilter(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"><option>All movement types</option>{(['Opening balance', 'Receipt', 'Stock in', 'Stock out', 'Production use', 'Production use correction', 'Transfer', 'Adjustment increase', 'Adjustment decrease'] as RawMaterialMovementType[]).map((type) => <option key={type}>{type}</option>)}</select><input aria-label="From date" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" /><input aria-label="To date" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" /></>}
         </div>}
       </div>
 
-      {view !== 'Daily production use' && <div className="flex justify-end gap-2 border-b border-slate-100 px-4 py-3">
-        {canEdit && view === 'Inventory' && <button type="button" onClick={() => { setDialog('material'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.PackagePlus className="size-4" /> Add material</button>}
-        {canEdit && view === 'Stock-in history' && <button type="button" onClick={() => { setDialog('receipt'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowDownToLine className="size-4" /> Record stock-in</button>}
+      {view !== 'Daily production use' && view !== 'Packaging' && <div className="flex justify-end gap-2 border-b border-slate-100 px-4 py-3">
+        {canEdit && view === 'Inventory' && <button type="button" onClick={() => { setDialog('material'); clearMessage() }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.PackagePlus className="size-4" /> Add material</button>}
+        {canEdit && view === 'Stock-in history' && <button type="button" onClick={() => { setDialog('receipt'); clearMessage() }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowDownToLine className="size-4" /> Record stock-in</button>}
         {canEdit && view === 'All movements' && <>
-          <button type="button" onClick={() => { setDialog('adjustment'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.SlidersHorizontal className="size-4" /> Adjust stock</button>
-          <button type="button" onClick={() => { setDialog('transfer'); setMessage('') }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowLeftRight className="size-4" /> Transfer stock</button>
+          <button type="button" onClick={() => { setDialog('adjustment'); clearMessage() }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.SlidersHorizontal className="size-4" /> Adjust stock</button>
+          <button type="button" onClick={() => { setDialog('transfer'); clearMessage() }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowLeftRight className="size-4" /> Transfer stock</button>
         </>}
       </div>}
 
@@ -549,9 +578,9 @@ export default function RawMaterialManagement({
         materials={visibleMaterials}
         locationFilter={locationFilter}
         canEdit={canEdit}
-        onConfigure={(material, location) => { setSelectedMaterial(material); setSelectedLocation(location); setDialog('location'); setMessage('') }}
-        onEdit={(material) => { setSelectedMaterial(material); setDialog('editMaterial'); setMessage('') }}
-        onDelete={(material) => { setSelectedMaterial(material); setDialog('deleteMaterial'); setMessage('') }}
+        onConfigure={(material, location) => { setSelectedMaterial(material); setSelectedLocation(location); setDialog('location'); clearMessage() }}
+        onEdit={(material) => { setSelectedMaterial(material); setDialog('editMaterial'); clearMessage() }}
+        onDelete={(material) => { setSelectedMaterial(material); setDialog('deleteMaterial'); clearMessage() }}
       />}
       {view === 'Stock-in history' && <ReceiptTable groups={receiptGroups} />}
       {view === 'All movements' && <MovementTable movements={visibleMovements} />}
@@ -560,6 +589,13 @@ export default function RawMaterialManagement({
         const material = materials.find((item) => item.id === materialId)
         return `${material?.name ?? ''} ${material?.code ?? ''} ${alert.location}`.toLowerCase().includes(search.trim().toLowerCase())
       })} materials={materials} />}
+      {view === 'Packaging' && <EndOfDayCounts
+        materials={materials.filter((material) => material.trackingMode === 'physical-count')}
+        counts={physicalCounts.data?.counts ?? []}
+        locations={locations}
+        canEdit={canEdit}
+        onSaved={() => { void physicalCounts.refetch(); void workspace.refetch() }}
+      />}
       {view === 'Daily production use' && <ProductionUseView
         products={products.filter((product) => product.active && product.recipe)}
         filterProducts={products}
@@ -586,14 +622,17 @@ export default function RawMaterialManagement({
         onProductFilter={setUsageProductFilter}
         expandedId={expandedUsageId}
         onToggleUsage={(id) => setExpandedUsageId((current) => current === id ? '' : id)}
-        onEditUsage={(usage) => { usageUpdateMutation.reset(); setEditingUsage(usage); setMessage('') }}
+        onEditUsage={(usage) => { usageUpdateMutation.reset(); setEditingUsage(usage); clearMessage() }}
         onDownloadUsage={downloadUsagePdf}
         onSubmit={submitUsage}
         disabled={usageMutation.isPending}
         canEdit={canEdit}
       />}
 
-      {(message || isPending) && <p role="status" className="border-t border-slate-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">{isPending ? 'Saving inventory change…' : message}</p>}
+      {(message || isPending) && <p
+        role={messageTone === 'error' && !isPending ? 'alert' : 'status'}
+        className={`border-t px-4 py-3 text-xs ${isPending ? 'border-amber-200 bg-amber-50 text-amber-800' : messageTone === 'error' ? 'border-rose-200 bg-rose-50 text-rose-800' : messageTone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+      >{isPending ? 'Saving inventory change…' : message}</p>}
       <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Recipe quantities are for one 1,000-litre tank. Direct usage edits append stock correction movements; legacy production-run usage records are retained as read-only history.</footer>
     </section>
 
@@ -609,6 +648,7 @@ export default function RawMaterialManagement({
       onSubmit={submitForm}
       pending={isPending}
       message={message}
+      messageTone={messageTone}
     />}
     {editingUsage && canEdit && <ProductionUsageEditDialog
       key={editingUsage.id}
@@ -620,6 +660,128 @@ export default function RawMaterialManagement({
       onClose={() => { if (!usageUpdateMutation.isPending) setEditingUsage(null) }}
       onSubmit={submitUsageEdit}
     />}
+  </div>
+}
+
+function EndOfDayCounts({
+  materials,
+  counts,
+  locations,
+  canEdit,
+  onSaved,
+}: {
+  materials: ProductionMaterial[]
+  counts: RawMaterialCountRecord[]
+  locations: string[]
+  canEdit: boolean
+  onSaved: () => void
+}) {
+  const [materialId, setMaterialId] = useState('')
+  const [location, setLocation] = useState(locations[0] ?? 'Main Warehouse')
+  const [countDate, setCountDate] = useState(today())
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
+  const material = materials.find((item) => item.id === materialId)
+  const packageUnits = material?.packagingLevels ?? []
+  const units = [...packageUnits.map((level) => level.name), material?.unit ?? 'pieces']
+  const currentQuantity = material ? locationFor(material, location)?.quantity ?? 0 : 0
+  const countedQuantity = material
+    ? packageUnits.reduce((total, level) => {
+      const conversion = packagingChoices(material).find((choice) => choice.name === level.name)
+      const entered = Number(quantities[level.name] || 0)
+      return total + (Number.isInteger(entered) && entered >= 0 ? entered : 0) * (conversion?.baseUnitsPerPackage ?? 0)
+    }, Number(quantities[material.unit] || 0))
+    : 0
+  const liveVariance = countedQuantity - currentQuantity
+  const submitMutation = useMutation({
+    mutationFn: submitRawMaterialCount,
+    onSuccess: () => onSaved(),
+  })
+  const entries = () => units.filter((unit) => unit).map((unit) => ({ name: unit, quantity: Math.max(0, Number.parseInt(quantities[unit] || '0', 10) || 0) }))
+  const input = () => ({
+    materialId,
+    location,
+    countDate,
+    packageEntries: entries(),
+    idempotencyKey: `${countDate}:${materialId}:${location}:${createId('count')}`,
+  })
+
+  const packageQuantityChanged = (unit: string, value: string) => {
+    setQuantities((current) => ({ ...current, [unit]: value }))
+  }
+
+  return <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
+    <section className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Field label="Physical-count material">
+          <select value={materialId} onChange={(event) => { setMaterialId(event.target.value); setQuantities({}) }} className={inputClass}>
+            <option value="">Select material</option>
+            {materials.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Location"><select value={location} onChange={(event) => setLocation(event.target.value)} className={inputClass}>{locations.map((item) => <option key={item} value={item}>{item}</option>)}</select></Field>
+        <Field label="Count date"><input type="date" value={countDate} onChange={(event) => setCountDate(event.target.value)} className={inputClass} /></Field>
+      </div>
+      {!materials.length ? <EmptyState title="No physical-count materials" detail="Create a raw material and choose a non-ingredient category, such as Packaging, to enable physical counts." /> : material && <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div><h4 className="text-sm font-bold text-slate-800">Package count</h4><p className="mt-1 text-xs text-slate-500">Enter whole quantities for the units found in your physical count.</p></div>
+          <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">{material.unit}</span>
+        </div>
+        <div className="mt-4 grid gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 sm:grid-cols-2">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">Current stock</div>
+            <div className="mt-1 text-sm font-bold text-sky-950">{currentQuantity.toLocaleString()} {material.unit}</div>
+            <div className="mt-0.5 text-xs text-sky-800">{packageBreakdown(currentQuantity, material)}</div>
+          </div>
+          <div className="border-t border-sky-200 pt-2 sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">Count entered</div>
+            <div className="mt-1 text-sm font-bold text-sky-950">{countedQuantity.toLocaleString()} {material.unit}</div>
+            <div className={`mt-0.5 text-xs font-semibold ${liveVariance === 0 ? 'text-sky-800' : liveVariance > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+              Variance: {liveVariance > 0 ? '+' : ''}{liveVariance.toLocaleString()} {material.unit}
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {units.map((unit, index) => <div key={unit} className="rounded-lg border border-slate-200 bg-white p-3">
+            <label className="text-xs font-semibold text-slate-600" htmlFor={`count-package-${index}`}>{unit} count</label>
+            {unit !== material.unit && <div className="mt-1 text-[10px] text-slate-500">{describePackaging(material).split('; ').find((description) => description.startsWith(`1 ${unit} =`))}</div>}
+            <input
+              id={`count-package-${index}`}
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              value={quantities[unit] ?? ''}
+              placeholder="Enter quantity"
+              onChange={(event) => packageQuantityChanged(unit, event.target.value)}
+              className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
+            />
+          </div>)}
+        </div>
+        {currentQuantity <= 0
+          ? <p role="status" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">This material is out of stock at {location}; physical counts are unavailable until stock is received.</p>
+          : <div className="mt-4 flex justify-end">
+            <button type="button" disabled={!canEdit || submitMutation.isPending} onClick={() => submitMutation.mutate(input())} className="rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{submitMutation.isPending ? 'Submitting…' : 'Submit count'}</button>
+          </div>}
+      </section>}
+      {submitMutation.error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{messageFor(submitMutation.error)}</p>}
+    </section>
+    <aside className="space-y-4">
+      <section className="rounded-xl border border-slate-200 p-4">
+        <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Count variance</h4>
+        {material ? <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          {[['Expected', currentQuantity], ['Counted', countedQuantity], ['Variance', liveVariance]].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-slate-50 px-2 py-3"><div className="text-sm font-bold text-slate-800">{Number(value).toLocaleString()}</div><div className="mt-1 text-[10px] text-slate-500">{label} {label !== 'Variance' ? material.unit : ''}</div></div>)}
+        </div> : <p className="mt-3 text-xs text-slate-500">Select a material to compare your count with current stock.</p>}
+      </section>
+      <section className="rounded-xl border border-slate-200 p-4">
+        <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">Recent counts</h4>
+        {!counts.length ? <p className="mt-3 text-xs text-slate-500">No counts recorded yet.</p> : <div className="mt-3 space-y-2">
+          {counts.slice(0, 6).map((count) => <article key={count.id} className="rounded-lg border border-slate-100 p-3">
+            <div className="flex items-start justify-between gap-2"><div><div className="text-xs font-bold text-slate-800">{count.materialName}</div><div className="mt-1 text-[10px] text-slate-500">{count.location} · {count.countDate}</div></div><span className={`rounded-full px-2 py-1 text-[9px] font-bold ${count.status === 'submitted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{count.status}</span></div>
+            <div className="mt-2 text-xs text-slate-600">Variance: <strong>{count.variance.toLocaleString()} {count.unit}</strong></div>
+          </article>)}
+        </div>}
+      </section>
+    </aside>
   </div>
 }
 
@@ -895,23 +1057,36 @@ function ProductionUsageEditDialog({ usage, products, locations, pending, messag
   </div>
 }
 
-function InventoryDialog({ mode, materials, locations, users, material, location, onClose, onSubmit, pending, message }: {
+function InventoryDialog({ mode, materials, locations, users, material, location, onClose, onSubmit, pending, message, messageTone }: {
   mode: Exclude<Dialog, null>
   materials: ProductionMaterial[]
   locations: string[]
-  users: Array<{ id: string; name: string; email: string }>
+  users: Array<{ id: string; name: string; email: string; roles: string[] }>
   material: ProductionMaterial | null
   location: string
   onClose: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   pending: boolean
   message: string
+  messageTone: MessageTone
 }) {
+  const [category, setCategory] = useState(mode === 'editMaterial' && material ? material.category : 'Ingredients')
+  const [trackingMode, setTrackingMode] = useState<'recipe-consumption' | 'physical-count'>(
+    mode === 'editMaterial' && material
+      ? materialCategories.includes(material.category)
+        ? material.category === 'Ingredients' ? 'recipe-consumption' : 'physical-count'
+        : material.trackingMode ?? 'recipe-consumption'
+      : 'recipe-consumption',
+  )
   const [packagingLevels, setPackagingLevels] = useState<PackagingLevelInput[]>(() =>
     mode === 'editMaterial' && material
       ? (material.packagingLevels ?? []).map((level) => ({ name: level.name, quantity: String(level.quantity) }))
       : [],
   )
+  const locationBalance = material ? locationFor(material, location) : undefined
+  const defaultResponsibleUserId = locationBalance?.responsibleUserId
+    ?? users.find((user) => user.roles.includes('Inventory Manager'))?.id
+    ?? ''
   const firstMaterial = materials.find((item) => item.active)
   const [receiptMaterialId, setReceiptMaterialId] = useState(firstMaterial?.id ?? '')
   const [receiptPackageUnit, setReceiptPackageUnit] = useState(() => {
@@ -931,8 +1106,29 @@ function InventoryDialog({ mode, materials, locations, users, material, location
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Material code"><input required name="code" defaultValue={mode === 'editMaterial' ? material?.code : ''} className={inputClass} /></Field>
           <Field label="Material name"><input required name="name" defaultValue={mode === 'editMaterial' ? material?.name : ''} className={inputClass} /></Field>
-          <Field label="Category"><input required name="category" defaultValue={mode === 'editMaterial' ? material?.category : 'Ingredients'} className={inputClass} /></Field>
+          <Field label="Category">
+            <select
+              required
+              name="category"
+              value={category}
+              onChange={(event) => {
+                const nextCategory = event.target.value
+                setCategory(nextCategory)
+                setTrackingMode(nextCategory === 'Ingredients' ? 'recipe-consumption' : 'physical-count')
+              }}
+              className={inputClass}
+            >
+              {!materialCategories.includes(category) && <option value={category}>{category} · existing category</option>}
+              {materialCategories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </Field>
           <Field label="Base unit (used for stock and recipes)"><input required name="unit" defaultValue={mode === 'editMaterial' ? material?.unit : ''} placeholder="kg, L, pcs" className={inputClass} /></Field>
+          <Field label="Inventory behavior (from category)">
+            <div className={`${inputClass} flex items-center font-medium text-slate-700`}>
+              {trackingMode === 'recipe-consumption' ? 'Consumed by product recipes' : 'Counted manually in Packaging'}
+            </div>
+            <input type="hidden" name="trackingMode" value={trackingMode} />
+          </Field>
         </div>
         {mode === 'editMaterial' && <p className="rounded-md bg-amber-50 px-3 py-2 text-[10px] text-amber-800">Changing the base unit is allowed only before stock movements, stock or reorder thresholds, current product recipes, or pending production runs exist. Historical movements keep their original names, units, and package snapshots.</p>}
         <section className="rounded-lg border border-slate-200 p-4">
@@ -988,7 +1184,7 @@ function InventoryDialog({ mode, materials, locations, users, material, location
       </div>}
       {mode === 'adjustment' && <div className="grid gap-4 sm:grid-cols-2"><Field label="Material"><select required name="materialId" className={inputClass}><option value="">Select material</option>{materials.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>)}</select></Field><Field label="Location"><select required name="location" className={inputClass}>{locations.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="Adjustment type"><select required name="direction" className={inputClass}><option value="in">Increase</option><option value="out">Decrease</option></select></Field><Field label="Quantity"><input required name="quantity" type="number" min="0.000001" step="any" className={inputClass} /></Field><Field label="Date"><input required name="date" type="date" defaultValue={today()} className={inputClass} /></Field><Field label="Reference"><input name="reference" className={inputClass} /></Field><Field label="Reason"><input required name="reason" className={inputClass} /></Field></div>}
       {mode === 'transfer' && <div className="grid gap-4 sm:grid-cols-2"><Field label="Material"><select required name="materialId" className={inputClass}><option value="">Select material</option>{materials.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>)}</select></Field><Field label="Quantity"><input required name="quantity" type="number" min="0.000001" step="any" className={inputClass} /></Field><Field label="From location"><select required name="fromLocation" className={inputClass}>{locations.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="To location"><input required name="toLocation" list="inventory-locations-transfer" className={inputClass} /><datalist id="inventory-locations-transfer">{locations.map((item) => <option key={item} value={item} />)}</datalist></Field><Field label="Date"><input required name="date" type="date" defaultValue={today()} className={inputClass} /></Field><Field label="Reference"><input name="reference" className={inputClass} /></Field><Field label="Reason"><input required name="reason" className={inputClass} /></Field></div>}
-      {mode === 'location' && material && <div className="grid gap-4 sm:grid-cols-2"><Field label="Material"><input disabled value={`${material.name} (${material.unit})`} className={inputClass} /></Field><Field label="Store location"><input disabled value={location} className={inputClass} /></Field><Field label="Low-stock threshold"><input required name="reorderThreshold" type="number" min="0" step="any" defaultValue={locationFor(material, location)?.reorderThreshold ?? 0} className={inputClass} /></Field><Field label="Responsible person"><select name="responsibleUserId" defaultValue={locationFor(material, location)?.responsibleUserId ?? ''} className={inputClass}><option value="">Not assigned</option>{users.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}</select></Field></div>}
+      {mode === 'location' && material && <div className="grid gap-4 sm:grid-cols-2"><Field label="Material"><input disabled value={`${material.name} (${material.unit})`} className={inputClass} /></Field><Field label="Store location"><input disabled value={location} className={inputClass} /></Field><Field label="Low-stock threshold"><input required name="reorderThreshold" type="number" min="0" step="any" defaultValue={locationBalance?.reorderThreshold ?? 0} className={inputClass} /></Field><Field label="Responsible person"><select name="responsibleUserId" defaultValue={defaultResponsibleUserId} className={inputClass}><option value="">Not assigned</option>{users.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}{user.roles.includes('Inventory Manager') ? ' · Inventory Manager' : ''}</option>)}</select></Field></div>}
       {mode === 'deleteMaterial' && material && <div className="space-y-3">
         <p className="text-sm text-slate-700">Delete <strong>{material.name}</strong> ({material.code}) and all current stock balances?</p>
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
@@ -996,7 +1192,7 @@ function InventoryDialog({ mode, materials, locations, users, material, location
           <p className="mt-2">Historical stock movements and production-use records are retained for audit traceability. Deletion is blocked while a current product recipe or pending production run uses this material.</p>
         </div>
       </div>}
-      {message && <p role="alert" className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">{message}</p>}
+      {message && <p role={messageTone === 'error' ? 'alert' : 'status'} className={`rounded-md border px-3 py-2 text-xs ${messageTone === 'error' ? 'border-rose-200 bg-rose-50 text-rose-800' : messageTone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>{message}</p>}
       <footer className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} disabled={pending} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Cancel</button><button type="submit" disabled={pending} className={`rounded-lg px-4 py-2 text-xs font-semibold disabled:opacity-40 ${mode === 'deleteMaterial' ? 'bg-rose-700 text-white hover:bg-rose-800' : 'bg-primary text-primary-foreground'}`}>{pending ? 'Saving…' : mode === 'material' ? 'Add raw material' : mode === 'editMaterial' ? 'Save changes' : mode === 'deleteMaterial' ? 'Delete material and stock' : 'Save'}</button></footer>
     </form>
   </section></div>

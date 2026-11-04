@@ -390,6 +390,7 @@ export type ProductionMaterial = {
   category: string
   unit: string
   packagingLevels?: MaterialPackagingLevel[]
+  trackingMode?: 'recipe-consumption' | 'physical-count'
   active: boolean
   balance: number
   locations: RawMaterialLocationBalance[]
@@ -938,14 +939,14 @@ export async function listInventoryResponsibleUsers() {
   return request<{ users: InventoryResponsibleUser[] }>('/production/materials/responsible-users')
 }
 
-export async function createProductionMaterial(input: { code: string; name: string; category: string; unit: string; packagingLevels?: MaterialPackagingLevel[] }) {
+export async function createProductionMaterial(input: { code: string; name: string; category: string; unit: string; packagingLevels?: MaterialPackagingLevel[]; trackingMode?: 'recipe-consumption' | 'physical-count' }) {
   return request<{ material: ProductionMaterial }>('/production/materials', {
     method: 'POST',
     body: JSON.stringify(input),
   })
 }
 
-export async function updateProductionMaterial(id: string, input: { code: string; name: string; category: string; unit: string; packagingLevels?: MaterialPackagingLevel[] }) {
+export async function updateProductionMaterial(id: string, input: { code: string; name: string; category: string; unit: string; packagingLevels?: MaterialPackagingLevel[]; trackingMode?: 'recipe-consumption' | 'physical-count' }) {
   return request<{ material: ProductionMaterial }>(`/production/materials/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
@@ -956,6 +957,65 @@ export async function deleteProductionMaterial(id: string) {
   return request<{ deleted: true; materialId: string; deletedUnit: string; deletedStock: number; deletedLocationCount: number; preservedMovementCount: number }>(`/production/materials/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
+}
+
+export type RawMaterialCountPackageEntry = {
+  name: string
+  quantity: number
+}
+
+export type RawMaterialCountRecord = {
+  id: string
+  materialId: string
+  materialName: string
+  unit: string
+  location: string
+  countDate: string
+  status: 'draft' | 'submitted'
+  packageEntries: Array<RawMaterialCountPackageEntry & { baseUnitsPerPackage: number }>
+  packagingSnapshot: Array<{ name: string; quantity: number; baseUnitsPerPackage: number }>
+  expectedQuantity: number
+  countedQuantity: number
+  variance: number
+  adjustmentMovementId: string | null
+  submittedAt: string | null
+}
+
+export type RawMaterialCountInput = {
+  materialId: string
+  location: string
+  countDate: string
+  packageEntries: RawMaterialCountPackageEntry[]
+  idempotencyKey?: string
+}
+
+export async function previewRawMaterialCount(input: RawMaterialCountInput) {
+  return request<{ materialId: string; location: string; countDate: string; expectedQuantity: number; countedQuantity: number; variance: number; unit: string; packagingSnapshot: Array<{ name: string; quantity: number; baseUnitsPerPackage: number }> }>('/production/materials/counts/preview', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function saveRawMaterialCount(input: RawMaterialCountInput) {
+  return request<{ count: RawMaterialCountRecord }>('/production/materials/counts/drafts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function submitRawMaterialCount(input: RawMaterialCountInput) {
+  return request<{ count: RawMaterialCountRecord; replayed: boolean }>('/production/materials/counts/submit', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function listRawMaterialCounts(filters: { materialId?: string; location?: string; countDate?: string; limit?: number } = {}) {
+  const params = new URLSearchParams()
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  })
+  return request<{ counts: RawMaterialCountRecord[] }>(`/production/materials/counts${params.size ? `?${params.toString()}` : ''}`)
 }
 
 export async function configureRawMaterialLocation(id: string, location: string, input: { reorderThreshold: number; responsibleUserId: string | null }) {
