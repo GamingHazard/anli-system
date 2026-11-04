@@ -30,6 +30,7 @@ export default function ModuleRoute({ active }: { active: string }) {
       customerLoadError={workspace.customerLoadError}
       onRetryCustomers={workspace.retryCustomers}
       customerCanManage={workspace.customerCanManage}
+      customerCanArchive={workspace.customerCanArchive}
     />
   );
 }

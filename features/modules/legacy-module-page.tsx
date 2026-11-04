@@ -41,6 +41,7 @@ export function ModulePage({
   customerLoadError,
   onRetryCustomers,
   customerCanManage,
+  customerCanArchive,
 }: {
   active: string;
   state: ErpState;
@@ -60,6 +61,7 @@ export function ModulePage({
   customerLoadError: string;
   onRetryCustomers: () => void;
   customerCanManage: boolean;
+  customerCanArchive: boolean;
 }) {
   const customerCanRead = hasAnyDepartmentRole(currentUser.roles, [
     "Sales Manager",
@@ -515,6 +517,7 @@ export function ModulePage({
         loadError={customerLoadError}
         onRetry={onRetryCustomers}
         canManage={customerCanManage}
+        canArchive={customerCanArchive}
         onView={onView}
       />
     );

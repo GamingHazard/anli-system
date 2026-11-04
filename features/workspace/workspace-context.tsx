@@ -38,6 +38,7 @@ export type WorkspaceContextValue = {
   retryCustomers: () => void;
   customerCanRead: boolean;
   customerCanManage: boolean;
+  customerCanArchive: boolean;
   salesLoaded: boolean;
   salesLoadError: string;
   salesMigrationWarning: string;

@@ -68,6 +68,7 @@ export function CustomerManagementPage({
   loadError,
   onRetry,
   canManage,
+  canArchive,
   onView,
 }: {
   state: ErpState;
@@ -76,6 +77,7 @@ export function CustomerManagementPage({
   loadError: string;
   onRetry: () => void;
   canManage: boolean;
+  canArchive: boolean;
   onView: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -838,10 +840,10 @@ export function CustomerManagementPage({
                               <Icons.Download className="size-3.5 text-slate-400" />{" "}
                               Download
                             </button>
-                            {canManage && (
+                            {canArchive && (
                               <div className="my-1 border-t border-slate-100" />
                             )}
-                            {canManage && (
+                            {canArchive && (
                               <button
                                 type="button"
                                 role="menuitem"

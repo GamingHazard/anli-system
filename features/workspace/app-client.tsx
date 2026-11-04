@@ -109,6 +109,14 @@ export default function AppClient({
     hasAnyDepartmentRole(currentUser.roles, [
       "Sales Manager",
       "General Manager",
+      "Marketing Manager",
+    ]),
+  );
+  const customerCanArchive = Boolean(
+    currentUser &&
+    hasAnyDepartmentRole(currentUser.roles, [
+      "Sales Manager",
+      "General Manager",
     ]),
   );
   const selectedEmployee = state.employees.find(
@@ -311,6 +319,7 @@ export default function AppClient({
     currentUser?.mustChangePassword,
     customerCanRead,
     customerCanManage,
+    customerCanArchive,
     customerLoadAttempt,
   ]);
   useEffect(() => {
@@ -635,6 +644,7 @@ export default function AppClient({
     retryCustomers: () => setCustomerLoadAttempt((attempt) => attempt + 1),
     customerCanRead,
     customerCanManage,
+    customerCanArchive,
     salesLoaded,
     salesLoadError,
     salesMigrationWarning,
