@@ -14,7 +14,7 @@ import {
 import { customerPath, employeePath, pathForSection, payrollPath, salaryAdvancePath, sectionForPath } from "@/lib/app-routes";
 import { importLegacyCustomersOnce } from "@/lib/customer-migration";
 import { importLegacySalesOnce } from "@/lib/sales-migration";
-import { createInvoiceSellerSnapshot, getSavedCustomersForImport, getSavedSalesForImport, linkCustomerTransactions, loadState, saveState, CompanyProfile, Employee, ErpState, Sale, SalePayment } from "@/lib/erp";
+import { createInvoiceSellerSnapshot, getSavedCustomersForImport, getSavedSalesForImport, linkCustomerTransactions, loadState, navGroups, saveState, CompanyProfile, Employee, ErpState, Sale, SalePayment } from "@/lib/erp";
 import { ActiveSession, ApiError, importLegacyCustomers, importLegacySales, listCustomers, listEmployees, getCompanyProfile, getCurrentSession, getEmployee, getPublicCompanyBrand, listSales, signIn, signOut, PublicCompanyBrand, UserAccount } from "@/lib/user-api";
 import { Header, Sidebar } from "@/features/workspace/legacy-shell";
 import { WorkspaceContext } from "@/features/workspace/workspace-context";
@@ -520,6 +520,25 @@ export default function AppClient({
     currentUser && companyProfileLoaded
       ? state.companyProfile.logo.url || publicBrand.logoUrl
       : publicBrand.logoUrl;
+  const accessibleNavItemCount = currentUser
+    ? navGroups.reduce(
+        (count, group) =>
+          count +
+          group.items.filter(
+            (item) =>
+              canAccessSection(currentUser.roles, item.label) &&
+              (item.label !== "Assets Management" || assetCanRead) &&
+              (item.label !== "Customer Management" || customerCanRead) &&
+              (item.label !== "Sales" || salesCanRead) &&
+              (item.label !== "Credit Sales" || salesCanRead) &&
+              (item.label !== "Receipt Management" || salesCanRead),
+          ).length,
+        0,
+      )
+    : 0;
+  const showNavigation = Boolean(
+    currentUser && accessibleNavItemCount > 1
+  );
   const routeAllowed = Boolean(
     currentUser && canAccessPath(currentUser.roles, pathname),
   );
@@ -666,9 +685,10 @@ export default function AppClient({
             canReadCustomers={customerCanRead}
             canReadSales={salesCanRead}
             currentUser={currentUser}
+            showNavigation={showNavigation}
           />
           <div
-            className={`transition-[margin] duration-200 ${collapsed ? "lg:ml-[76px]" : "lg:ml-[252px]"}`}
+            className={`transition-[margin] duration-200 ${showNavigation ? (collapsed ? "lg:ml-[76px]" : "lg:ml-[252px]") : ""}`}
           >
             <Header
               active={active}
@@ -677,6 +697,7 @@ export default function AppClient({
               onNavigate={setActive}
               onLogout={handleLogout}
               onChangePassword={() => setShowChangePassword(true)}
+              showNavigation={showNavigation}
             />
             {showChangePassword && (
               <ChangePasswordDialog

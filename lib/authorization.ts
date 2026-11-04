@@ -53,7 +53,7 @@ export function canAccessSection(roles: readonly UserRole[], section: string) {
       return roles.some((role) => ['General Manager', 'Human Resource'].includes(role))
     }
     if (section === 'General Settings') {
-      return roles.some((role) => ['General Manager', 'Sales Manager'].includes(role))
+      return roles.includes('General Manager')
     }
     return roles.includes('General Manager') && section === 'Company Profile Management'
   }

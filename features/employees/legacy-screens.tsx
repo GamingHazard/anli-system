@@ -370,7 +370,7 @@ export function EmployeeDirectory({
           <p className="mt-1 text-xs text-sky-900">
             Import {legacyImport.employees.length} browser-saved employee
             profile(s) and {legacyImport.employeeDrafts.length} draft(s) into
-            the server. Seeded demo employees are excluded. Existing local
+            the server. Legacy seeded employees are excluded. Existing local
             images/documents cannot be copied unless you upload the original
             files again.
           </p>

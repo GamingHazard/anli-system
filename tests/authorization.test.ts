@@ -42,6 +42,8 @@ describe("role-based section access", () => {
     expect(canAccessSection(["General Manager"], "User Management")).toBe(true);
     expect(canAccessSection(["General Manager"], "Company Profile Management")).toBe(true);
     expect(canAccessSection(["General Manager"], "Security Settings")).toBe(false);
+    expect(canAccessSection(["General Manager"], "General Settings")).toBe(true);
+    expect(canAccessSection(["Sales Manager"], "General Settings")).toBe(false);
 
     expect(canAccessSection(["Super Admin"], "Security Settings")).toBe(true);
     expect(canAccessSection(["Admin"], "Company Profile Management")).toBe(false);

@@ -543,8 +543,7 @@ export function ModulePage({
           </div>
           <h2 className="text-2xl font-bold tracking-tight">{active}</h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            Manage {active.toLowerCase()} with connected mock workflows and
-            local demonstration persistence.
+            Manage {active.toLowerCase()} records and connected workspace data.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -593,7 +592,7 @@ export function ModulePage({
               <Kpi
                 label="Total records"
                 value={String(data.length)}
-                change="Live demo data"
+                change="Live data"
                 icon="Layers3"
                 tone="purple"
                 onClick={() => undefined}
@@ -1971,7 +1970,7 @@ export function FormDialogShell({
             <p className="mt-0.5 text-xs text-slate-400">
               {active === "Orders"
                 ? "Add a customer order to the fulfilment queue."
-                : "This record will persist in the demo workspace."}
+                : "This record will be saved to the ERP workspace."}
             </p>
           </div>
           <button
@@ -2411,8 +2410,8 @@ export function AnalyticsPanel({
       Icon: Icons.AlertTriangle,
     },
     {
-      title: "Data boundary",
-      text: "All figures are simulated and stored only in this browser.",
+      title: "Data status",
+      text: "Figures are derived from live ERP records.",
       Icon: Icons.Info,
     },
   ];
@@ -2422,7 +2421,7 @@ export function AnalyticsPanel({
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
         <h3 className="text-sm font-bold">{active} overview</h3>
         <p className="mt-1 text-xs text-slate-400">
-          Derived from your shared demonstration records.
+          Derived from the workspace records available to you.
         </p>
         <div className="mt-5 h-[320px]">
           <ResponsiveContainer width="100%" height="100%">

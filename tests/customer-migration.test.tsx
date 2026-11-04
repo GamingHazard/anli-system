@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cloneSeed } from '@/lib/erp'
 import { CUSTOMER_IMPORT_MARKER_KEY, importLegacyCustomersOnce } from '@/lib/customer-migration'
+
+const customers = [
+  { id: 'C-MIGRATION-1', name: 'Migration Customer', type: 'Retail', phone: '+256 700 000001', email: 'migration@example.com', status: 'Active', purchases: 0 },
+] as Parameters<typeof importLegacyCustomersOnce>[1]
 
 describe('safe customer migration', () => {
   beforeEach(() => localStorage.clear())
 
   it('marks migration complete only after the server confirms all records', async () => {
-    const customers = cloneSeed().customers
     const importer = vi.fn().mockResolvedValue({ rejected: [] })
 
     await expect(importLegacyCustomersOnce(true, customers, importer)).resolves.toBe('')
@@ -15,7 +17,6 @@ describe('safe customer migration', () => {
   })
 
   it('retains local data and leaves migration retryable after a partial rejection', async () => {
-    const customers = cloneSeed().customers
     const importer = vi.fn().mockResolvedValue({
       rejected: [{ id: customers[0].id, index: 0, reason: 'duplicate name' }],
     })
@@ -25,7 +26,6 @@ describe('safe customer migration', () => {
   })
 
   it('does not attempt import or set a marker for read-only users', async () => {
-    const customers = cloneSeed().customers
     const importer = vi.fn()
 
     await expect(importLegacyCustomersOnce(false, customers, importer)).resolves.toMatch(/Ask a customer manager/)
@@ -34,7 +34,6 @@ describe('safe customer migration', () => {
   })
 
   it('reports API failures and retries safely without clearing the browser snapshot', async () => {
-    const customers = cloneSeed().customers
     const importer = vi.fn().mockRejectedValue(new Error('Server unavailable'))
 
     await expect(importLegacyCustomersOnce(true, customers, importer)).resolves.toMatch(/Server unavailable/)

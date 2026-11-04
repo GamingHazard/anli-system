@@ -28,6 +28,7 @@ export function Sidebar({
   canReadCustomers,
   canReadSales,
   currentUser,
+  showNavigation,
 }: {
   active: string;
   setActive: (value: string) => void;
@@ -41,6 +42,7 @@ export function Sidebar({
   canReadCustomers: boolean;
   canReadSales: boolean;
   currentUser: UserAccount;
+  showNavigation: boolean;
 }) {
   const queryClient = useQueryClient();
   const approvalInboxQuery = useApprovalInbox(
@@ -69,6 +71,8 @@ export function Sidebar({
       ),
     }))
     .filter((group) => group.items.length > 0);
+  if (!showNavigation) return null;
+
   return (
     <>
       <div
@@ -199,6 +203,7 @@ export function Header({
   onNavigate,
   onLogout,
   onChangePassword,
+  showNavigation,
 }: {
   active: string;
   setMobileNav: (value: boolean) => void;
@@ -206,6 +211,7 @@ export function Header({
   onNavigate: (section: string) => void;
   onLogout: () => void;
   onChangePassword: () => void;
+  showNavigation: boolean;
 }) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -233,13 +239,13 @@ export function Header({
   return (
     <header className="sticky top-0 z-30 flex h-[76px] items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur sm:px-6 lg:px-8">
       <div className="flex items-center gap-3">
-        <button
+        {showNavigation && <button
           aria-label="Open navigation"
           onClick={() => setMobileNav(true)}
           className="rounded-lg p-2 hover:bg-slate-100 lg:hidden"
         >
           <Menu className="size-5" />
-        </button>
+        </button>}
         <div>
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span>Workspace</span>
