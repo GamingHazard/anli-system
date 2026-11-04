@@ -325,14 +325,14 @@ export function CustomerManagementPage({
           <div className="mb-2 text-xs font-medium text-slate-400">
             Workspace / Customer Management
           </div>
-          <h2 className="text-2xl font-bold tracking-tight">
+          <h2 className="text-2xl font-bold tracking-tight sm:text-[28px]">
             Customer directory
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
             One customer record, linked to every sale, order and repayment.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 sm:flex sm:justify-end">
           <button
             onClick={() =>
               exportCsv(
@@ -364,9 +364,10 @@ export function CustomerManagementPage({
                 }),
               )
             }
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
           >
-            <Download className="size-4" /> Export CSV
+            <Download className="size-4 shrink-0" />
+            <span className="hidden sm:inline">Export CSV</span>
           </button>
           {canManage && (
             <button
@@ -376,7 +377,7 @@ export function CustomerManagementPage({
                 setActionError("");
                 setShowForm(true);
               }}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#6d28d9] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus className="size-4" /> Add customer
             </button>
@@ -424,7 +425,7 @@ export function CustomerManagementPage({
         </div>
       )}
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
         <CustomerMetric
           label="Total customers"
           value={state.customers.length}
@@ -455,16 +456,16 @@ export function CustomerManagementPage({
         />
       </div>
 
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 flex-1 flex-wrap gap-2">
-            <label className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 sm:max-w-sm sm:flex-1">
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-3 sm:p-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-2 xl:flex xl:flex-wrap">
+            <label className="col-span-2 flex min-h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 sm:col-span-1 xl:max-w-sm xl:flex-1">
               <Search className="size-4 shrink-0 text-slate-400" />
               <input
                 aria-label="Search customers"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400 xl:text-xs"
                 placeholder="Name, ID, contact, location or transaction"
               />
             </label>
@@ -472,7 +473,7 @@ export function CustomerManagementPage({
               aria-label="Filter by customer type"
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
             >
               <option>All types</option>
               {types.map((type) => (
@@ -483,7 +484,7 @@ export function CustomerManagementPage({
               aria-label="Filter by account status"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
             >
               <option>All statuses</option>
               <option>Active</option>
@@ -496,7 +497,7 @@ export function CustomerManagementPage({
                 aria-label="Filter by region"
                 value={regionFilter}
                 onChange={(event) => setRegionFilter(event.target.value)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
               >
                 <option>All regions</option>
                 {regions.map((region) => (
@@ -509,7 +510,7 @@ export function CustomerManagementPage({
                 aria-label="Filter by district"
                 value={districtFilter}
                 onChange={(event) => setDistrictFilter(event.target.value)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
               >
                 <option>All districts</option>
                 {districts.map((district) => (
@@ -522,7 +523,7 @@ export function CustomerManagementPage({
                 aria-label="Filter by referrer"
                 value={referrerFilter}
                 onChange={(event) => setReferrerFilter(event.target.value)}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                className="min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
               >
                 <option>All referrers</option>
                 {referrers.map((referrer) => (
@@ -531,7 +532,7 @@ export function CustomerManagementPage({
               </select>
             )}
           </div>
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-500">
+          <label className="flex min-h-10 items-center justify-between gap-2 text-xs font-medium text-slate-500 xl:justify-start">
             Revenue period
             <select
               aria-label="Revenue period"
@@ -539,7 +540,7 @@ export function CustomerManagementPage({
               onChange={(event) =>
                 setPeriod(event.target.value as typeof period)
               }
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+              className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
             >
               <option value="month">This month</option>
               <option value="year">This year</option>
@@ -547,7 +548,112 @@ export function CustomerManagementPage({
             </select>
           </label>
         </div>
-        <div className="overflow-x-auto">
+        <div className="divide-y divide-slate-100 md:hidden">
+          {filteredCustomers.map((customer) => {
+            const sales = customerSalesFor(customer, state);
+            const periodSales = sales.filter(
+              (sale) => !selectedPeriodStart || sale.date >= selectedPeriodStart,
+            );
+            const balance = customerCreditBalance(customer, state);
+            const lastSale = [...sales].sort((left, right) =>
+              right.date.localeCompare(left.date),
+            )[0];
+            return (
+              <article
+                key={customer.id}
+                className="p-4 transition-colors hover:bg-slate-50/60"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="grid size-10 shrink-0 place-items-center rounded-full bg-violet-50 text-xs font-bold text-violet-700">
+                    {initials(customer.name)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onView(customer.id)}
+                        className="min-w-0 text-left"
+                      >
+                        <span className="block truncate text-sm font-bold text-slate-800">
+                          {customer.name}
+                        </span>
+                        <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400">
+                          {customer.id}
+                        </span>
+                      </button>
+                      <Status text={customer.status} />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                      <span>{customer.type}</span>
+                      {customer.phone && (
+                        <a
+                          href={`tel:${customer.phone}`}
+                          className="inline-flex items-center gap-1 font-medium text-violet-700"
+                        >
+                          <Icons.Phone className="size-3" />
+                          {customer.phone}
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <dl className="mt-4 grid grid-cols-3 rounded-lg bg-slate-50 px-3 py-3">
+                  <div>
+                    <dt className="text-[10px] text-slate-400">Sales</dt>
+                    <dd className="mt-1 text-xs font-bold text-slate-800">
+                      {sales.length}
+                    </dd>
+                  </div>
+                  <div className="border-l border-slate-200 px-3">
+                    <dt className="text-[10px] text-slate-400">Revenue</dt>
+                    <dd className="mt-1 truncate text-xs font-bold text-slate-800" title={money(sum(periodSales.map((sale) => sale.total)))}>
+                      {money(sum(periodSales.map((sale) => sale.total)))}
+                    </dd>
+                  </div>
+                  <div className="border-l border-slate-200 pl-3">
+                    <dt className="text-[10px] text-slate-400">Credit</dt>
+                    <dd className="mt-1 truncate text-xs font-bold text-slate-800" title={money(balance)}>
+                      {money(balance)}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-400">
+                    Last sale: {lastSale ? formatDate(lastSale.date) : "—"}
+                  </span>
+                  <div className="flex gap-2">
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCustomer(customer);
+                          setActionError("");
+                          setShowForm(true);
+                        }}
+                        className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-white"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onView(customer.id)}
+                      className="min-h-9 rounded-lg bg-violet-50 px-3 text-xs font-semibold text-violet-700 hover:bg-violet-100"
+                    >
+                      View profile
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+          {!filteredCustomers.length && (
+            <div className="px-4 py-12 text-center text-sm text-slate-400">
+              No customers match these filters.
+            </div>
+          )}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[1150px] text-left text-xs">
             <thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400">
               <tr>
@@ -826,20 +932,20 @@ export function CustomerMetric({
           ? "bg-amber-50 text-amber-700"
           : "bg-violet-50 text-violet-700";
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
       <div className="flex items-center justify-between">
         <span
           className={`grid size-9 place-items-center rounded-lg ${toneClass}`}
         >
           <Icon className="size-[17px]" />
         </span>
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        <span className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-400 sm:inline">
           Live
         </span>
       </div>
       <div className="mt-3 text-xl font-bold tracking-tight">{value}</div>
-      <div className="mt-0.5 text-xs font-semibold text-slate-700">{label}</div>
-      <div className="mt-1 text-[10px] text-slate-400">{detail}</div>
+      <div className="mt-0.5 text-xs font-semibold leading-tight text-slate-700">{label}</div>
+      <div className="mt-1 hidden text-[10px] leading-relaxed text-slate-400 sm:block">{detail}</div>
     </div>
   );
 }
@@ -866,7 +972,7 @@ export function CustomerFormDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/40 p-4"
+      className="fixed inset-0 z-[70] grid items-end bg-slate-950/40 sm:place-items-center sm:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -875,9 +981,9 @@ export function CustomerFormDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="customer-form-title"
-        className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-2xl"
+        className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:max-h-[92vh] sm:rounded-xl"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3 sm:px-5 sm:py-4">
           <div>
             <h3 id="customer-form-title" className="text-base font-bold">
               {customer ? "Edit customer" : "Add customer"}
@@ -900,7 +1006,7 @@ export function CustomerFormDialog({
             event.preventDefault();
             onSave(new FormData(event.currentTarget));
           }}
-          className="p-5"
+          className="p-4 sm:p-5"
         >
           {saveError && (
             <p
@@ -1054,17 +1160,17 @@ export function CustomerFormDialog({
               />
             </label>
           </div>
-          <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4">
+          <div className="-mx-4 mt-6 grid grid-cols-2 gap-2 border-t border-slate-100 px-4 pt-4 sm:-mx-5 sm:flex sm:justify-end sm:px-5">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="min-h-11 rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
               disabled={isSaving}
-              className="rounded-lg bg-[#6d28d9] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-11 rounded-lg bg-[#6d28d9] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSaving
                 ? "Saving…"
@@ -1251,7 +1357,47 @@ export function CustomerDetails({
               </p>
             </div>
             {sales.length ? (
-              <div className="overflow-x-auto">
+              <>
+                <div className="divide-y divide-slate-100 sm:hidden">
+                  {sales.map((sale) => (
+                    <article key={sale.id} className="px-4 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-bold text-slate-800">
+                            {sale.reference}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-400">
+                            {formatDate(sale.date)}
+                          </div>
+                        </div>
+                        <Status
+                          text={
+                            sale.paymentTerms === "Credit"
+                              ? paymentStateForSale(sale, state.payments)
+                              : sale.status
+                          }
+                        />
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
+                        <div>
+                          <div className="text-[10px] text-slate-400">Product</div>
+                          <div className="mt-1 truncate font-semibold text-slate-700">{sale.product}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-400">Total</div>
+                          <div className="mt-1 font-semibold text-slate-700">{money(sale.total)}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-slate-400">Balance</div>
+                          <div className="mt-1 font-semibold text-slate-700">
+                            {money(sale.paymentTerms === "Credit" ? balanceForSale(sale, state.payments) : 0)}
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[560px] text-left text-xs">
                   <thead className="bg-slate-50 text-[10px] uppercase text-slate-400">
                     <tr>
@@ -1303,7 +1449,8 @@ export function CustomerDetails({
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
+              </>
             ) : (
               <p className="px-5 py-8 text-center text-xs text-slate-400">
                 No sales linked to this customer yet.
@@ -1424,15 +1571,15 @@ export function DetailView({
       >
         <ChevronLeft className="size-4" /> Back to list
       </button>
-      <div className="mb-6 flex items-start gap-4">
+      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:gap-4">
         <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-[#f1eafd] text-lg font-bold text-[#6d28d9]">
           {initials(name)}
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="text-xs font-medium text-slate-400">
             Workspace / {title}
           </div>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">{name}</h2>
+          <h2 className="mt-1 break-words text-xl font-bold tracking-tight sm:text-2xl">{name}</h2>
           <p className="mt-1 text-sm text-slate-500">
             {meta} · {subtitle}
           </p>
