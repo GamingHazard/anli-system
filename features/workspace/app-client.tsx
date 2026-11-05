@@ -11,11 +11,48 @@ import {
   hasAnyDepartmentRole,
   hasDepartmentRole,
 } from "@/lib/authorization";
-import { customerPath, employeePath, pathForSection, payrollPath, salaryAdvancePath, sectionForPath } from "@/lib/app-routes";
+import {
+  customerPath,
+  employeePath,
+  pathForSection,
+  payrollPath,
+  salaryAdvancePath,
+  sectionForPath,
+} from "@/lib/app-routes";
 import { importLegacyCustomersOnce } from "@/lib/customer-migration";
 import { importLegacySalesOnce } from "@/lib/sales-migration";
-import { createInvoiceSellerSnapshot, getSavedCustomersForImport, getSavedSalesForImport, linkCustomerTransactions, loadState, navGroups, saveState, CompanyProfile, Employee, ErpState, Sale, SalePayment } from "@/lib/erp";
-import { ActiveSession, ApiError, importLegacyCustomers, importLegacySales, listCustomers, listEmployees, getCompanyProfile, getCurrentSession, getEmployee, getPublicCompanyBrand, listSales, signIn, signOut, PublicCompanyBrand, UserAccount } from "@/lib/user-api";
+import {
+  clearState,
+  createInvoiceSellerSnapshot,
+  getSavedCustomersForImport,
+  getSavedSalesForImport,
+  linkCustomerTransactions,
+  loadState,
+  navGroups,
+  saveState,
+  CompanyProfile,
+  Employee,
+  ErpState,
+  Sale,
+  SalePayment,
+} from "@/lib/erp";
+import {
+  ActiveSession,
+  ApiError,
+  importLegacyCustomers,
+  importLegacySales,
+  listCustomers,
+  listEmployees,
+  getCompanyProfile,
+  getCurrentSession,
+  getEmployee,
+  getPublicCompanyBrand,
+  listSales,
+  signIn,
+  signOut,
+  PublicCompanyBrand,
+  UserAccount,
+} from "@/lib/user-api";
 import { Header, Sidebar } from "@/features/workspace/legacy-shell";
 import { WorkspaceContext } from "@/features/workspace/workspace-context";
 
@@ -40,11 +77,7 @@ const SessionIdleGuard = dynamic(() =>
 
 const queryClient = new QueryClient();
 
-export default function AppClient({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AppClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -161,14 +194,20 @@ export default function AppClient({
     },
     [],
   );
+  const clearClientSessionData = useCallback(() => {
+    clearState();
+    queryClient.clear();
+    setState(loadState());
+  }, []);
   const handleSessionEnded = useCallback(() => {
+    clearClientSessionData();
     setCurrentUser(null);
     setSessionInfo(null);
     setAuthError("Your session ended. Sign in again to continue.");
     setActive("Dashboard");
     setMobileNav(false);
     setShowChangePassword(false);
-  }, [setActive]);
+  }, [clearClientSessionData, setActive]);
   useEffect(() => {
     let mounted = true;
     getPublicCompanyBrand()
@@ -423,15 +462,19 @@ export default function AppClient({
         if (mounted && result) {
           setCurrentUser(result.user);
           setSessionInfo(result.session);
+        } else if (mounted) {
+          clearClientSessionData();
         }
       })
       .catch((error: unknown) => {
-        if (mounted)
+        if (mounted) {
+          clearClientSessionData();
           setAuthError(
             error instanceof ApiError
               ? error.message
               : "Could not verify your session.",
           );
+        }
       })
       .finally(() => {
         if (mounted) setAuthLoading(false);
@@ -439,7 +482,7 @@ export default function AppClient({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [clearClientSessionData]);
   useEffect(() => {
     if (authLoading) return;
     if (!currentUser || currentUser.mustChangePassword) {
@@ -545,9 +588,7 @@ export default function AppClient({
         0,
       )
     : 0;
-  const showNavigation = Boolean(
-    currentUser && accessibleNavItemCount > 1
-  );
+  const showNavigation = Boolean(currentUser && accessibleNavItemCount > 1);
   const routeAllowed = Boolean(
     currentUser && canAccessPath(currentUser.roles, pathname),
   );
