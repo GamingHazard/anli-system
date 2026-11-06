@@ -5,10 +5,42 @@ import * as Icons from "lucide-react";
 import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import { useAttendanceMonth } from "@/lib/attendance-queries";
 import { useLeaveRequests } from "@/lib/leave-queries";
-import { useDisciplinaryCases, useDisciplinaryIndicators } from "@/lib/disciplinary-queries";
+import {
+  useDisciplinaryCases,
+  useDisciplinaryIndicators,
+} from "@/lib/disciplinary-queries";
 import { useSalaryAdvances } from "@/lib/salary-advance-queries";
-import { createId, employeeDisplayName, formatDate, getLegacyEmployeeImport, clearLegacyEmployeeImport, initials, money, AttendanceRecord, Employee, EmployeeDraft, ErpState } from "@/lib/erp";
-import { ApiError, createEmployee as createEmployeeApi, deactivateEmployee as deactivateEmployeeApi, deleteEmployeeDraft, importLocalEmployees, listEmployeeDrafts, listEmployees, removeEmployeeDocument, removeEmployeeImage, saveEmployeeDraft, updateEmployee as updateEmployeeApi, uploadEmployeeDocument, uploadEmployeeImage, getEmployeeDocumentDownload, DisciplinaryIndicator, UserAccount } from "@/lib/user-api";
+import {
+  createId,
+  employeeDisplayName,
+  formatDate,
+  getLegacyEmployeeImport,
+  clearLegacyEmployeeImport,
+  initials,
+  money,
+  AttendanceRecord,
+  Employee,
+  EmployeeDraft,
+  ErpState,
+} from "@/lib/erp";
+import {
+  ApiError,
+  createEmployee as createEmployeeApi,
+  deactivateEmployee as deactivateEmployeeApi,
+  deleteEmployeeDraft,
+  importLocalEmployees,
+  listEmployeeDrafts,
+  listEmployees,
+  removeEmployeeDocument,
+  removeEmployeeImage,
+  saveEmployeeDraft,
+  updateEmployee as updateEmployeeApi,
+  uploadEmployeeDocument,
+  uploadEmployeeImage,
+  getEmployeeDocumentDownload,
+  DisciplinaryIndicator,
+  UserAccount,
+} from "@/lib/user-api";
 import { companyWorkDate } from "@/features/workspace/dates";
 import { AttendanceRecordDialog } from "@/features/attendance/record-dialog";
 import { Status } from "@/features/workspace/legacy-widgets";
@@ -2615,7 +2647,9 @@ export function EmployeeProfile({
       );
     }
     if (activeTab === "leave") {
-      const employeeLeave = (leaveQuery.data?.requests ?? [])
+      const employeeLeave = (
+        leaveQuery.data?.pages.flatMap((page) => page.requests) ?? []
+      )
         .filter((request) => request.employeeId === employee.id)
         .sort((left, right) => right.startDate.localeCompare(left.startDate));
       return (

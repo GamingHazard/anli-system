@@ -62,6 +62,13 @@ const today = () =>
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+const monthRange = (month: string) => {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return {
+    from: `${month}-01`,
+    to: new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10),
+  };
+};
 const statusStyle = (status: string) =>
   status === "Approved"
     ? "bg-emerald-50 text-emerald-700"
@@ -90,7 +97,9 @@ export default function LeaveManagement({
     useState<LegacyLeaveImportPreview | null>(null);
   const [legacyImportMessage, setLegacyImportMessage] = useState("");
   const preservedLegacySnapshot = useRef(false);
-  const requestQuery = useLeaveRequests();
+  const requestQuery = useLeaveRequests(
+    view === "Team calendar" ? monthRange(month) : {},
+  );
   const policyQuery = useLeavePolicy();
   const isAdmin = hasAnyDepartmentRole(currentUser.roles, [
     "Human Resource",
@@ -113,13 +122,28 @@ export default function LeaveManagement({
   const routingMutation = useUpdateLeaveRouting();
   const legacyPreviewMutation = usePreviewLegacyLeaveRequests();
   const legacyImportMutation = useImportLegacyLeaveRequests();
-  const requests = requestQuery.data?.requests ?? [];
+  const requests =
+    requestQuery.data?.pages.flatMap((page) => page.requests) ?? [];
   useEffect(() => {
     if (!requestQuery.data || preservedLegacySnapshot.current) return;
     preserveLegacyLeaveRequests(state.leaveRequests);
     setLegacyRequests(getLegacyLeaveRequests());
     preservedLegacySnapshot.current = true;
   }, [requestQuery.data, state.leaveRequests]);
+  useEffect(() => {
+    if (
+      view !== "Team calendar" ||
+      !requestQuery.hasNextPage ||
+      requestQuery.isFetchingNextPage
+    )
+      return;
+    void requestQuery.fetchNextPage();
+  }, [
+    view,
+    requestQuery.hasNextPage,
+    requestQuery.isFetchingNextPage,
+    requestQuery.fetchNextPage,
+  ]);
   const activeEmployees = state.employees.filter(
     (employee) => employee.status === "Active",
   );
@@ -727,6 +751,20 @@ export default function LeaveManagement({
                   : "New submissions will appear here for review."
               }
             />
+          )}
+          {view === "Requests" && requestQuery.hasNextPage && (
+            <div className="flex justify-center border-t border-slate-100 p-3">
+              <button
+                type="button"
+                disabled={requestQuery.isFetchingNextPage}
+                onClick={() => void requestQuery.fetchNextPage()}
+                className="rounded-md border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"
+              >
+                {requestQuery.isFetchingNextPage
+                  ? "Loading…"
+                  : "Load older requests"}
+              </button>
+            </div>
           )}
         </section>
       )}
