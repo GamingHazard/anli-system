@@ -507,15 +507,22 @@ export function SessionIdleGuard({
     session.idleTimeoutMs / 2,
   );
   const remainingSeconds = Math.max(0, Math.ceil((idleDeadline - now) / 1000));
-  const lastLocalActivity = useRef(0);
+
+  const syncIdleDeadline = (nextSession: Pick<ActiveSession, "idleExpiresAt" | "absoluteExpiresAt">) => {
+    const serverDeadline = new Date(nextSession.idleExpiresAt).getTime();
+    const absoluteDeadline = new Date(nextSession.absoluteExpiresAt).getTime();
+    if (!Number.isFinite(serverDeadline) || !Number.isFinite(absoluteDeadline)) {
+      return;
+    }
+    setIdleDeadline(Math.min(serverDeadline, absoluteDeadline));
+  };
 
   useEffect(() => {
-    const serverDeadline = new Date(session.idleExpiresAt).getTime();
-    setIdleDeadline(serverDeadline);
+    syncIdleDeadline(session);
     setNow(Date.now());
     lastActivityRequest.current = 0;
     expiryHandled.current = false;
-  }, [session.id, session.idleExpiresAt]);
+  }, [session.absoluteExpiresAt, session.id, session.idleExpiresAt]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -531,24 +538,22 @@ export function SessionIdleGuard({
   }, [idleDeadline, now, onExpired]);
 
   useEffect(() => {
-    const signalActivity = () => {
+    const refreshSessionActivity = () => {
       if (document.visibilityState !== "visible") return;
       const currentTime = Date.now();
-      if (currentTime - lastLocalActivity.current < 1000) return;
-      lastLocalActivity.current = currentTime;
       const absoluteDeadline = new Date(session.absoluteExpiresAt).getTime();
       const localDeadline = Math.min(
         currentTime + session.idleTimeoutMs,
         absoluteDeadline,
       );
-      setIdleDeadline(localDeadline);
+      setIdleDeadline(Math.min(localDeadline, absoluteDeadline));
       setActivityError("");
       if (currentTime - lastActivityRequest.current < 30_000) return;
       lastActivityRequest.current = currentTime;
       reportSessionActivity()
         .then(({ session: updatedSession }) => {
           onSessionUpdate(updatedSession);
-          setIdleDeadline(new Date(updatedSession.idleExpiresAt).getTime());
+          syncIdleDeadline(updatedSession);
         })
         .catch((error: unknown) => {
           if (error instanceof ApiError && error.status === 401) {
@@ -572,12 +577,16 @@ export function SessionIdleGuard({
       "scroll",
     ];
     activityEvents.forEach((eventName) =>
-      window.addEventListener(eventName, signalActivity, { passive: true }),
+      window.addEventListener(eventName, refreshSessionActivity, { passive: true }),
     );
+    window.addEventListener("focus", refreshSessionActivity);
+    document.addEventListener("visibilitychange", refreshSessionActivity);
     return () => {
       activityEvents.forEach((eventName) =>
-        window.removeEventListener(eventName, signalActivity),
+        window.removeEventListener(eventName, refreshSessionActivity),
       );
+      window.removeEventListener("focus", refreshSessionActivity);
+      document.removeEventListener("visibilitychange", refreshSessionActivity);
     };
   }, [
     onExpired,
@@ -585,6 +594,7 @@ export function SessionIdleGuard({
     session.absoluteExpiresAt,
     session.id,
     session.idleTimeoutMs,
+    session.idleExpiresAt,
   ]);
 
   if (now < idleDeadline - warningMs) {

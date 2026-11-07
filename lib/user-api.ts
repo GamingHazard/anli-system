@@ -423,14 +423,115 @@ export async function importLegacyAssets(
   });
 }
 
+type CloudinarySignedUploadResponse = {
+  uploadUrl: string;
+  apiKey: string;
+  timestamp: number;
+  signature: string;
+  publicId: string;
+  folder: string;
+  cloudName: string;
+  resourceType: "image" | "raw";
+  type: "upload" | "authenticated";
+  maxBytes: number;
+  allowedFormats: string[];
+};
+
+async function requestSignedCloudinaryUpload(
+  file: File,
+  options: {
+    folder: string;
+    resourceType?: "image" | "raw";
+    type?: "upload" | "authenticated";
+    maxBytes?: number;
+    allowedFormats?: string[];
+    publicId?: string;
+  },
+) {
+  const signed = await request<CloudinarySignedUploadResponse>(
+    "/uploads/signed",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        folder: options.folder,
+        resourceType: options.resourceType || "image",
+        type: options.type || "upload",
+        maxBytes: options.maxBytes ?? 1024 * 1024,
+        allowedFormats: options.allowedFormats,
+        publicId: options.publicId,
+      }),
+    },
+  );
+
+  const form = new FormData();
+  form.set("file", file);
+  form.set("api_key", signed.apiKey);
+  form.set("timestamp", String(signed.timestamp));
+  form.set("signature", signed.signature);
+  form.set("public_id", signed.publicId);
+  form.set("folder", signed.folder);
+  form.set("resource_type", signed.resourceType);
+  form.set("type", signed.type);
+  if (signed.maxBytes > 0) {
+    form.set("max_file_size", String(signed.maxBytes));
+  }
+  if (signed.allowedFormats.length) {
+    form.set("allowed_formats", signed.allowedFormats.join(","));
+  }
+
+  const cloudinaryResponse = await fetch(signed.uploadUrl, {
+    method: "POST",
+    body: form,
+    credentials: "omit",
+  });
+  const payload = (await cloudinaryResponse.json().catch(() => ({}))) as {
+    error?: { message?: string } | string;
+    secure_url?: string;
+    public_id?: string;
+    resource_type?: string;
+    format?: string;
+    bytes?: number;
+  };
+
+  if (!cloudinaryResponse.ok || !payload.secure_url || !payload.public_id) {
+    const message =
+      typeof payload.error === "string"
+        ? payload.error
+        : payload.error?.message || "Cloudinary upload failed.";
+    throw new ApiError(
+      message,
+      cloudinaryResponse.status || 400,
+      "cloudinary_upload_failed",
+    );
+  }
+
+  return {
+    url: payload.secure_url,
+    publicId: payload.public_id,
+    resourceType: payload.resource_type || signed.resourceType,
+    format: payload.format || undefined,
+    bytes: payload.bytes ?? file.size,
+  };
+}
+
 export async function uploadAssetPhoto(id: string, photo: File) {
-  const body = new FormData();
-  body.set("photo", photo);
+  const upload = await requestSignedCloudinaryUpload(photo, {
+    folder: "anli/assets",
+    resourceType: "image",
+    type: "upload",
+    maxBytes: 5 * 1024 * 1024,
+    allowedFormats: ["jpg", "jpeg", "png", "webp"],
+  });
+
   return request<{ asset: AssetRecord }>(
     `/assets/${encodeURIComponent(id)}/photos`,
     {
       method: "POST",
-      body,
+      body: JSON.stringify({
+        url: upload.url,
+        publicId: upload.publicId,
+        resourceType: upload.resourceType,
+      }),
     },
   );
 }
@@ -459,12 +560,22 @@ export function updateCompanyProfile(profile: Omit<CompanyProfile, "logo">) {
   });
 }
 
-export function uploadCompanyLogo(file: File) {
-  const body = new FormData();
-  body.set("logo", file);
+export async function uploadCompanyLogo(file: File) {
+  const upload = await requestSignedCloudinaryUpload(file, {
+    folder: "anli/company-profile",
+    resourceType: "image",
+    type: "upload",
+    maxBytes: 2 * 1024 * 1024,
+    allowedFormats: ["png", "jpeg", "webp"],
+  });
+
   return request<{ logo: CompanyLogo }>("/profile-settings/logo", {
     method: "POST",
-    body,
+    body: JSON.stringify({
+      url: upload.url,
+      publicId: upload.publicId,
+      resourceType: upload.resourceType,
+    }),
   });
 }
 
@@ -2165,14 +2276,24 @@ export async function deactivateEmployee(id: string) {
   return normalizeEmployee(result.employee);
 }
 
-export function uploadEmployeeImage(id: string, file: File) {
-  const body = new FormData();
-  body.set("image", file);
+export async function uploadEmployeeImage(id: string, file: File) {
+  const upload = await requestSignedCloudinaryUpload(file, {
+    folder: "anli/employees/images",
+    resourceType: "image",
+    type: "upload",
+    maxBytes: 5 * 1024 * 1024,
+    allowedFormats: ["png", "jpeg", "webp"],
+  });
+
   return request<{ image: { url: string; publicId: string } }>(
     `/employees/${encodeURIComponent(id)}/image`,
     {
       method: "POST",
-      body,
+      body: JSON.stringify({
+        url: upload.url,
+        publicId: upload.publicId,
+        resourceType: upload.resourceType,
+      }),
     },
   );
 }
@@ -2186,15 +2307,30 @@ export function removeEmployeeImage(id: string) {
   );
 }
 
-export function uploadEmployeeDocument(id: string, title: string, file: File) {
-  const body = new FormData();
-  body.set("title", title);
-  body.set("document", file);
+export async function uploadEmployeeDocument(
+  id: string,
+  title: string,
+  file: File,
+) {
+  const upload = await requestSignedCloudinaryUpload(file, {
+    folder: "anli/employees/documents",
+    resourceType: "raw",
+    type: "authenticated",
+    maxBytes: 10 * 1024 * 1024,
+    allowedFormats: ["pdf", "doc", "docx", "jpg", "jpeg", "png"],
+  });
+
   return request<{ document: EmployeeDocument }>(
     `/employees/${encodeURIComponent(id)}/documents`,
     {
       method: "POST",
-      body,
+      body: JSON.stringify({
+        title,
+        url: upload.url,
+        publicId: upload.publicId,
+        resourceType: upload.resourceType,
+        fileName: file.name,
+      }),
     },
   );
 }
@@ -2977,13 +3113,24 @@ export async function rescindDisciplinaryCase(id: string, reason: string) {
 }
 
 export async function uploadDisciplinaryEvidence(id: string, file: File) {
-  const body = new FormData();
-  body.set("file", file);
+  const upload = await requestSignedCloudinaryUpload(file, {
+    folder: "anli/disciplinary/evidence",
+    resourceType: file.type === "application/pdf" ? "raw" : "image",
+    type: file.type === "application/pdf" ? "authenticated" : "upload",
+    maxBytes: 5 * 1024 * 1024,
+    allowedFormats: ["pdf", "jpg", "jpeg", "png", "webp"],
+  });
+
   return request<{ case: DisciplinaryCase }>(
     `/disciplinary-cases/${encodeURIComponent(id)}/evidence`,
     {
       method: "POST",
-      body,
+      body: JSON.stringify({
+        url: upload.url,
+        publicId: upload.publicId,
+        resourceType: upload.resourceType,
+        fileName: file.name,
+      }),
     },
   );
 }
@@ -3273,12 +3420,26 @@ export async function recordSalaryAdvanceRepayment(
   return normalizeSalaryAdvance(result.advance);
 }
 
-export function uploadSalaryAdvanceAttachment(id: string, file: File) {
-  const body = new FormData();
-  body.set("file", file);
+export async function uploadSalaryAdvanceAttachment(id: string, file: File) {
+  const upload = await requestSignedCloudinaryUpload(file, {
+    folder: "anli/salary-advances",
+    resourceType: file.type === "application/pdf" ? "raw" : "image",
+    type: file.type === "application/pdf" ? "authenticated" : "upload",
+    maxBytes: 5 * 1024 * 1024,
+    allowedFormats: ["pdf", "jpg", "jpeg", "png", "webp"],
+  });
+
   return request<{ attachment: SalaryAdvance["attachments"][number] }>(
     `/salary-advances/${encodeURIComponent(id)}/attachments`,
-    { method: "POST", body },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        url: upload.url,
+        publicId: upload.publicId,
+        resourceType: upload.resourceType,
+        fileName: file.name,
+      }),
+    },
   );
 }
 
@@ -3415,14 +3576,25 @@ export function recordExpensePayment(
   );
 }
 
-export function uploadExpenseAttachment(id: string, receipt: File) {
-  const body = new FormData();
-  body.set("receipt", receipt);
+export async function uploadExpenseAttachment(id: string, receipt: File) {
+  const upload = await requestSignedCloudinaryUpload(receipt, {
+    folder: "anli/expenses",
+    resourceType: receipt.type === "application/pdf" ? "raw" : "image",
+    type: receipt.type === "application/pdf" ? "authenticated" : "upload",
+    maxBytes: 5 * 1024 * 1024,
+    allowedFormats: ["pdf", "jpg", "jpeg", "png", "webp"],
+  });
+
   return request<{ expense: ManualExpense }>(
     `/expenses/${encodeURIComponent(id)}/attachments`,
     {
       method: "POST",
-      body,
+      body: JSON.stringify({
+        url: upload.url,
+        publicId: upload.publicId,
+        resourceType: upload.resourceType,
+        fileName: receipt.name,
+      }),
     },
   );
 }
